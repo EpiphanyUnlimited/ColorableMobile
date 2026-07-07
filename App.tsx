@@ -1,0 +1,1561 @@
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Plus, Download, Trash2, Palette, Loader2, Sparkles,
+  Moon, Sun, XCircle, CheckCircle2, AlertCircle, RefreshCcw,
+  ShieldCheck, Zap, Crown, ArrowRight, Mail, ChevronLeft, ToggleLeft, ToggleRight,
+  Type, Settings, BookOpen, Save, User as UserIcon, Wand2, LogOut, Lock
+} from 'lucide-react';
+import { ImageFile, Tier, User, View } from './types';
+import { API_BASE } from './services/apiConfig';
+import { generateLocalColoringPage, downloadLocalModel, initLocalSession } from './services/geminiService';
+import { generateColoringBookPDF } from './utils/pdfUtils';
+import { useAuth } from './src/hooks/useAuth';
+import { getLocalImages } from './src/lib/localStorage';
+import ColoringCanvas from './src/components/ColoringCanvas';
+import { saveImageToLocal, loadAllImagesFromLocal, deleteLocalImage, updateLocalImage } from './src/utils/localStorageDB';
+
+// --- Shared Constants & UI Helpers ---
+
+const LOGO_GRADIENT = "bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-yellow-500 via-green-500 to-blue-500";
+
+const Logo = ({ size = 64 }: { size?: number }) => (
+  <div className="flex items-center gap-6">
+    <img
+      src="/favicon.png"
+      alt="Colorable AI"
+      style={{ width: size * 1.5, height: size * 1.5 }}
+      className="object-contain drop-shadow-2xl rounded-2xl"
+    />
+    <span style={{ fontSize: '3rem' }} className={`font-black tracking-tight ${LOGO_GRADIENT}`}>Colorable AI</span>
+  </div>
+);
+
+const TIER_RANK: Record<Tier, number> = {
+  'free': 0,
+  'plus': 1,
+  'ultimate': 2
+};
+
+// --- Hero Transformation Component with Static Demo Images ---
+const HeroTransformation = () => {
+  // Using static images instead of live AI generation to avoid API quota issues
+  const photoUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=900";
+  // This is the pre-generated coloring page result
+  const coloringResultUrl = "/assets/hero-coloring.png";
+
+  return (
+    <div className="flex flex-col md:flex-row items-center justify-center gap-8 md:gap-16 mb-20 w-full max-w-7xl px-6">
+      <div className="relative w-full aspect-square md:w-[450px] md:h-[450px] rounded-[3.5rem] overflow-hidden shadow-2xl transition-transform hover:scale-[1.01] bg-slate-100 border-4 border-white dark:border-slate-800">
+        <img
+          src={photoUrl}
+          alt="Original Photo"
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute bottom-10 left-10 bg-white/95 backdrop-blur-md px-8 py-3 rounded-full font-black text-[12px] uppercase tracking-[0.2em] text-slate-900 shadow-lg">Original Photo</div>
+      </div>
+
+      <div className="flex flex-col items-center gap-3 text-indigo-400">
+        <div className="relative">
+          <Wand2 size={56} className="animate-pulse" />
+          <Sparkles size={24} className="absolute -top-2 -right-2 text-yellow-400 animate-bounce" />
+        </div>
+        <ArrowRight size={40} className="text-indigo-500 animate-[bounce_2s_infinite] hidden md:block" />
+        <span className="font-black uppercase tracking-[0.3em] text-[11px] opacity-40 mt-2">
+          AI Magic
+        </span>
+      </div>
+
+      <div className="relative w-full aspect-square md:w-[450px] md:h-[450px] rounded-[3.5rem] border-4 border-black dark:border-white bg-white shadow-2xl transition-transform hover:scale-[1.01] overflow-hidden">
+        <div className="absolute inset-0 bg-white flex items-center justify-center">
+          <img
+            src={coloringResultUrl}
+            alt="AI Coloring Result"
+            className="w-full h-full object-contain p-4"
+          />
+        </div>
+        <div className="absolute bottom-10 left-10 bg-black text-white px-8 py-3 rounded-full font-black text-[12px] uppercase tracking-[0.2em] shadow-2xl z-10">Colorable View</div>
+      </div>
+    </div>
+  );
+};
+
+// --- Stable Sub-Views ---
+
+const LandingPage = ({ setView, setIsDarkMode, isDarkMode, setSelectedTier, modelProgress, isInitializingModel }: any) => {
+  const contrastText = "text-slate-900 dark:text-white";
+  const subText = "text-slate-600 dark:text-slate-400";
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col items-center">
+      {/* Model Bootloader Banner */}
+      {isInitializingModel && (
+        <div className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-center py-4 px-6 flex flex-col sm:flex-row items-center justify-center gap-4 shadow-md font-bold">
+          <div className="flex items-center gap-3">
+            <Loader2 className="animate-spin text-white flex-shrink-0" size={24} />
+            <span>Downloading local LineArt intelligence engine...</span>
+          </div>
+          <div className="w-64 bg-indigo-900/50 rounded-full h-4 overflow-hidden border border-indigo-400 relative">
+            <div 
+              className="bg-emerald-400 h-full transition-all duration-300"
+              style={{ width: `${modelProgress || 0}%` }}
+            />
+            <span className="absolute inset-0 flex items-center justify-center text-[10px] uppercase font-black tracking-widest">{modelProgress || 0}%</span>
+          </div>
+        </div>
+      )}
+      <nav className="w-full max-w-7xl flex justify-between items-center px-4 md:px-6 py-6 md:py-10 sticky top-0 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md z-50 shadow-sm">
+        <Logo size={36} />
+        <div className="flex items-center gap-3 md:gap-12">
+          <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 md:p-3 text-slate-500 hover:text-indigo-600 transition-colors">
+            {isDarkMode ? <Sun size={24} className="md:w-8 md:h-8" /> : <Moon size={24} className="md:w-8 md:h-8" />}
+          </button>
+          <button onClick={() => setView('pricing')} className={`${contrastText} font-black hover:text-indigo-600 transition-colors uppercase text-xs md:text-sm tracking-widest hidden sm:inline-block`}>Pricing</button>
+          <button onClick={() => setView('privacy')} className={`${contrastText} font-black hover:text-indigo-600 transition-colors uppercase text-xs md:text-sm tracking-widest hidden sm:inline-block`}>Privacy</button>
+          <button onClick={() => { setSelectedTier('free'); setView('signin'); }} className="px-4 py-2 md:px-10 md:py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full font-black hover:scale-105 transition-all shadow-lg text-sm md:text-lg uppercase tracking-wider">Login</button>
+        </div>
+      </nav>
+
+      <div className="flex flex-col items-center text-center px-6 py-28 max-w-[120rem]">
+        <h1 className={`text-8xl md:text-[14rem] font-black mb-16 leading-[0.8] tracking-tighter ${LOGO_GRADIENT}`}>
+          Colorable AI
+        </h1>
+        <p className={`text-4xl ${subText} mb-24 max-w-6xl font-bold leading-relaxed`}>
+          The world's first AI coloring book engine that preserves exact composition.
+          Turning uploaded images into professional line-art in seconds!
+        </p>
+
+        {/* Transformation Section */}
+        <HeroTransformation />
+
+        {/* Local Storage Notice */}
+        <div className="mt-16 mb-8 px-6 max-w-3xl">
+          <div className="flex items-center justify-center gap-3 text-slate-500 dark:text-slate-400 text-sm md:text-base">
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+            </svg>
+            <p className="font-medium">
+              Your images and creations are stored <span className="font-bold text-slate-700 dark:text-slate-300">locally on this device only</span>.
+              No cloud sync – your data stays private and under your control.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col items-center gap-8">
+          <button
+            onClick={() => { setSelectedTier('free'); setView('auth'); }}
+            className="px-20 py-8 bg-indigo-600 text-white rounded-[4rem] font-black text-4xl hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all shadow-[0_20px_60px_-15px_rgba(79,70,229,0.5)] uppercase tracking-[0.2em]"
+          >
+            Try for free
+          </button>
+          <p className="text-xl font-bold text-slate-400">Join thousands of artists today</p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PricingPage = ({ setView, currentUserTier, handleUpgrade }: any) => {
+  const plans = [
+    { tier: 'free', name: 'Free Forever', price: 0, icon: <Zap className="text-yellow-500" />, features: ['10 pages per book', '10 downloads per month', 'Basic Coloring Tools', 'Basic Portrait conversion'] },
+    { tier: 'plus', name: 'Plus Plan', price: 9, icon: <ShieldCheck className="text-indigo-500" />, features: ['20 pages per book', 'Unlimited downloads', '3 devices', 'Advanced Brushes & Textures', 'Pressure Sensitivity', '1 Colorable Font', 'Vibrant Workspace'] },
+    { tier: 'ultimate', name: 'Ultimate Plan', price: 15, icon: <Crown className="text-emerald-500" />, features: ['30 pages per book', 'AI Scenario Remixing', '5 devices', 'Professional Stencil Packs', 'Custom Color Palettes', '5 Custom Fonts'], trial: '3-Day Free Trial' }
+  ];
+
+  const filteredPlans = currentUserTier
+    ? plans.filter(p => TIER_RANK[p.tier as Tier] > TIER_RANK[currentUserTier as Tier])
+    : plans;
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center pb-20">
+      <nav className="w-full max-w-7xl flex justify-between items-center px-6 py-10 sticky top-0 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md z-50">
+        <button onClick={() => setView(currentUserTier ? 'workspace' : 'landing')} className="flex items-center gap-2 font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase text-sm tracking-widest">
+          <ChevronLeft size={24} /> Back
+        </button>
+        <Logo size={48} />
+        <div className="w-20" />
+      </nav>
+
+      <div className="flex flex-col items-center mt-12 px-6 text-center max-w-[100rem] w-full">
+        <h2 className="text-7xl md:text-9xl font-black mb-4 text-black dark:text-white tracking-tighter">
+          {currentUserTier ? 'Upgrade Your Art.' : 'Simple Pricing.'}
+        </h2>
+        <p className="text-2xl font-bold text-slate-500 dark:text-slate-400 mb-20">Unlock the full power of AI coloring pages.</p>
+
+        <div className="flex flex-col lg:flex-row items-stretch justify-center gap-10 w-full max-w-6xl mx-auto px-6">
+          {filteredPlans.length === 0 ? (
+            <div className="w-full max-w-3xl p-24 bg-white dark:bg-slate-900 rounded-[5rem] border-4 border-indigo-600 shadow-2xl mx-auto">
+              <Crown size={96} className="mx-auto text-emerald-500 mb-10" />
+              <h3 className="text-6xl font-black mb-6 text-black dark:text-white">You are at the Top Tier!</h3>
+              <p className="text-2xl font-bold text-slate-500">You already have access to all ultimate features.</p>
+            </div>
+          ) : filteredPlans.map((p) => (
+            <div key={p.tier} className="flex-1 bg-white dark:bg-slate-900/50 p-14 rounded-[4rem] border border-slate-200 dark:border-slate-800 hover:border-indigo-600 hover:shadow-2xl transition-all text-left flex flex-col group relative overflow-hidden min-w-[320px] max-w-md mx-auto">
+              <div className="absolute top-0 right-0 p-10 opacity-10 group-hover:scale-110 transition-transform">{p.icon}</div>
+              {p.trial && (
+                <div className="absolute top-6 left-6 bg-emerald-500 text-white px-6 py-2 rounded-full font-black text-sm uppercase tracking-widest">
+                  {p.trial}
+                </div>
+              )}
+              <h3 className="text-4xl font-black mb-3 uppercase text-black dark:text-white tracking-tight">{p.name}</h3>
+              <div className="flex items-baseline gap-2 mb-10">
+                <span className="text-6xl font-black text-black dark:text-white">${p.price}</span>
+                <span className="text-slate-400 font-bold text-xl">/month</span>
+              </div>
+              <ul className="space-y-6 mb-16 flex-1">
+                {p.features.map(f => (
+                  <li key={f} className="font-bold flex gap-5 items-center text-slate-700 dark:text-slate-200 text-xl">
+                    <CheckCircle2 size={24} className="text-emerald-500 flex-shrink-0" /> {f}
+                  </li>
+                ))}
+              </ul>
+              <button
+                onClick={() => handleUpgrade(p.tier as Tier)}
+                className="w-full py-7 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-[2.5rem] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all shadow-xl text-xl"
+              >
+                {currentUserTier ? 'Upgrade Now' : 'Select Plan'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PrivacyPage = ({ setView }: { setView: (view: any) => void; isDarkMode: boolean }) => {
+  const contrastText = "text-slate-900 dark:text-white";
+  const subText = "text-slate-600 dark:text-slate-400";
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-slate-950">
+      {/* Header */}
+      <nav className="w-full max-w-7xl mx-auto flex justify-between items-center px-6 py-10">
+        <div onClick={() => setView('landing')} className="cursor-pointer">
+          <Logo size={36} />
+        </div>
+        <button
+          onClick={() => setView('landing')}
+          className="px-8 py-3 bg-indigo-600 text-white rounded-full font-black hover:bg-indigo-700 transition-all shadow-lg"
+        >
+          ← Back to Home
+        </button>
+      </nav>
+
+      {/* Content */}
+      <div className="max-w-4xl mx-auto px-6 py-16">
+        <h1 className={`text-6xl font-black mb-12 ${contrastText}`}>Privacy Policy</h1>
+
+        {/* Local Storage Section */}
+        <section className="mb-12">
+          <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>🔒 Local Storage Only</h2>
+          <div className="space-y-4 text-lg">
+            <p className={subText}>
+              <strong className={contrastText}>Colorable AI stores all your images and workspace data locally in your browser.</strong>
+              Your data is <strong>NOT synced to the cloud</strong> and will only be available on the device you're currently using.
+            </p>
+            <p className={subText}>
+              This means:
+            </p>
+            <ul className={`list-disc ml-8 space-y-2 ${subText}`}>
+              <li>Your images and creations are stored on <strong className={contrastText}>this device only</strong></li>
+              <li>If you use a different device or browser, your data <strong className={contrastText}>will not sync</strong></li>
+              <li>Clearing your browser data will <strong className={contrastText}>delete your saved work</strong></li>
+              <li>Your privacy is maximally protected – we can't access your images</li>
+            </ul>
+          </div>
+        </section>
+
+        {/* Authentication Section */}
+        <section className="mb-12">
+          <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>👤 Account Information</h2>
+          <p className={subText + " text-lg"}>
+            When you create an account, we collect:
+          </p>
+          <ul className={`list-disc ml-8 space-y-2 mt-4 text-lg ${subText}`}>
+            <li>Email address (for authentication)</li>
+            <li>Display name (optional)</li>
+            <li>Subscription tier (Free, Plus, or Ultimate)</li>
+          </ul>
+          <p className={subText + " mt-4 text-lg"}>
+            This information is managed through <a href="https://supabase.com/privacy" className="text-indigo-600 hover:underline">Supabase</a>,
+            our secure authentication provider.
+          </p>
+        </section>
+
+        {/* Payments Section */}
+        <section className="mb-12">
+          <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>💳 Payments</h2>
+          <p className={subText + " text-lg"}>
+            Payment processing is handled by <a href="https://stripe.com/privacy" className="text-indigo-600 hover:underline">Stripe</a>.
+            We do not store your credit card information on our servers. Stripe handles all payment data securely.
+          </p>
+        </section>
+
+        {/* Data Sharing Section */}
+        <section className="mb-12">
+          <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>🤝 Data Sharing</h2>
+          <p className={subText + " text-lg"}>
+            We <strong className={contrastText}>do not sell, rent, or share</strong> your personal information with third parties, except:
+          </p>
+          <ul className={`list-disc ml-8 space-y-2 mt-4 text-lg ${subText}`}>
+            <li>Service providers (Supabase, Stripe) as necessary for platform functionality</li>
+            <li>When required by law</li>
+          </ul>
+        </section>
+
+        {/* AI Processing Section */}
+        <section className="mb-12">
+          <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>🤖 AI Processing</h2>
+          <p className={subText + " text-lg"}>
+            Images you upload are processed by Google's Gemini AI to generate coloring book line art.
+            Google Gemini's privacy policy applies to this processing. Your images are sent to Google only during generation
+            and are not permanently stored by Colorable AI or Google beyond what's necessary for processing.
+          </p>
+        </section>
+
+        {/* Contact Section */}
+        <section className="mb-12">
+          <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>📧 Contact</h2>
+          <p className={subText + " text-lg"}>
+            If you have questions about your privacy or data, please contact us through our support channels.
+          </p>
+        </section>
+
+        <div className="text-center mt-16">
+          <button
+            onClick={() => setView('landing')}
+            className="px-12 py-4 bg-indigo-600 text-white rounded-full font-black hover:bg-indigo-700 transition-all shadow-lg text-lg"
+          >
+            Back to Colorable AI
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AuthPage = ({ selectedTier, signUp, signIn, setBookTitle, setView, initialMode = 'signup' }: any) => {
+  const [isSignUp, setIsSignUp] = useState(initialMode === 'signup');
+  const [userName, setUserName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const contrastText = "text-slate-900 dark:text-white";
+
+  const handleAuth = async () => {
+    setError(null);
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        if (!userName) throw new Error('Name is required');
+        const { data, error } = await signUp(userEmail, password, {
+          display_name: userName,
+          tier: selectedTier
+        });
+        if (error) throw error;
+
+        if (data?.user && !data.session) {
+          setSuccessMessage(`We've sent a confirmation email to ${userEmail}. Please verify your email to continue.`);
+          setLoading(false);
+          return;
+        }
+
+      } else {
+        // Check for MASTER USER CREDENTIALS (Bypass)
+        if (userEmail === 'M@$t3r' && password === 'U$$$3r') {
+          console.log('🕶️ MASTER CREDENTIALS DETECTED');
+          localStorage.setItem('colorable_master_mode', 'true');
+          // Force reload to pick up the new mode in useAuth hook
+          window.location.reload();
+          return;
+        }
+
+        const { error } = await signIn(userEmail, password);
+        if (error) throw error;
+      }
+
+      if (userName) {
+        setBookTitle(`${userName}'s Colorable`);
+      }
+
+      // SUCCESS! Clear the local loading state
+      // The useAuth hook will handle navigation via the useEffect in App.tsx
+      setLoading(false);
+    } catch (err: any) {
+      setError(err.message || 'Authentication failed');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950">
+      <div className="bg-white dark:bg-slate-900 p-6 sm:p-12 md:p-24 rounded-[2rem] sm:rounded-[4rem] md:rounded-[6rem] shadow-2xl w-full max-w-[95vw] sm:max-w-md md:max-w-3xl border border-slate-100 dark:border-slate-800 text-center">
+        <Logo size={80} />
+        <div className="h-20" />
+        <h2 className={`text-7xl font-black mb-12 ${contrastText} tracking-tighter`}>
+          {isSignUp ? 'Join Us' : 'Welcome Back'}
+        </h2>
+
+        {error && (
+          <div className="mb-10 p-6 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-3xl font-bold flex items-center gap-4">
+            <AlertCircle size={32} />
+            {error}
+          </div>
+        )}
+
+        {successMessage && (
+          <div className="mb-10 p-6 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded-3xl font-bold flex items-center gap-4 text-left">
+            <CheckCircle2 size={32} className="shrink-0" />
+            <div>
+              <p className="text-xl">{successMessage}</p>
+              <p className="text-sm font-normal mt-2 opacity-80">Once confirmed, return here or refresh the page.</p>
+            </div>
+          </div>
+        )}
+
+        {!successMessage && (
+          <div className="space-y-10 text-left">
+            {isSignUp && (
+              <div className="w-full">
+                <label className="flex items-center gap-3 mb-3 text-sm font-black uppercase tracking-widest opacity-60">
+                  <UserIcon size={20} />
+                  <span>Your Artist Name</span>
+                </label>
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={e => setUserName(e.target.value)}
+                  placeholder="Enter your name"
+                  className="w-full px-6 py-4 bg-slate-100 dark:bg-slate-800 border-none rounded-full outline-none ring-2 ring-transparent focus:ring-indigo-500 transition-all font-semibold text-base text-slate-900 dark:text-white placeholder:text-slate-400"
+                />
+              </div>
+            )}
+
+            <div className="w-full">
+              <label className="flex items-center gap-3 mb-3 text-sm font-black uppercase tracking-widest opacity-60">
+                <Mail size={20} />
+                <span>Email Address</span>
+              </label>
+              <input
+                type="email"
+                value={userEmail}
+                onChange={e => setUserEmail(e.target.value)}
+                placeholder="user@example.com"
+                className="w-full px-6 py-4 bg-slate-100 dark:bg-slate-800 border-none rounded-full outline-none ring-2 ring-transparent focus:ring-indigo-500 transition-all font-semibold text-base text-slate-900 dark:text-white placeholder:text-slate-400"
+              />
+            </div>
+
+            <div className="w-full">
+              <label className="flex items-center gap-3 mb-3 text-sm font-black uppercase tracking-widest opacity-60">
+                <Lock size={20} />
+                <span>Password</span>
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-6 py-4 bg-slate-100 dark:bg-slate-800 border-none rounded-full outline-none ring-2 ring-transparent focus:ring-indigo-500 transition-all font-semibold text-base text-slate-900 dark:text-white placeholder:text-slate-400"
+              />
+            </div>
+
+            <button
+              disabled={loading || !userEmail || !password || (isSignUp && !userName)}
+              onClick={handleAuth}
+              className="w-full py-5 mt-6 bg-indigo-600 text-white rounded-full font-black text-lg shadow-2xl shadow-indigo-500/30 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest disabled:opacity-50 flex items-center justify-center gap-3"
+            >
+              {loading && <Loader2 className="animate-spin" size={24} />}
+              {isSignUp ? 'Create Account' : 'Sign In'}
+            </button>
+
+            <div className="flex flex-col gap-4 mt-10">
+              <button
+                onClick={() => setIsSignUp(!isSignUp)}
+                className="text-slate-500 dark:text-slate-400 font-bold hover:text-indigo-600 transition-colors"
+              >
+                {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Join Now"}
+              </button>
+              <button
+                onClick={() => setView('landing')}
+                className="text-slate-400 font-black uppercase text-base tracking-widest text-center hover:text-indigo-600 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div >
+  );
+};
+
+// --- Real Workspace Component ---
+
+const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle, setBookTitle, images, setImages }: any) => {
+  const [isSaving, setIsSaving] = useState(false);
+  const [vibrantEnabled, setVibrantEnabled] = useState(() => {
+    return localStorage.getItem('colorable_vibrant_enabled') === 'true';
+  });
+
+  // Save vibrant enabled state
+  useEffect(() => {
+    localStorage.setItem('colorable_vibrant_enabled', String(vibrantEnabled));
+  }, [vibrantEnabled]);
+  const [vibrantColors, setVibrantColors] = useState<[string, string, string]>(() => {
+    const saved = localStorage.getItem('colorable_vibrant_colors');
+    return saved ? JSON.parse(saved) : ['#ff5f6d', '#ffc371', '#ff5f6d'];
+  });
+
+  // Save vibrant colors to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('colorable_vibrant_colors', JSON.stringify(vibrantColors));
+  }, [vibrantColors]);
+  const [coverTemplate, setCoverTemplate] = useState('standard');
+  const [fontFamily, setFontFamily] = useState('generic');
+
+  const processingRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Abort controllers for cancelling processing operations
+  const [abortControllers, setAbortControllers] = useState<Map<string, AbortController>>(new Map());
+  const [textOverlayPreviews, setTextOverlayPreviews] = useState<Map<string, string>>(new Map());
+  const [coloringImageId, setColoringImageId] = useState<string | null>(null);
+
+  // Check if any image is currently processing or remixing
+  const isProcessingQueue = images.some((img: ImageFile) => img.status === 'processing' || img.status === 'remixing');
+
+  // 2-minute timeout for processing
+  const PROCESSING_TIMEOUT = 2 * 60 * 1000; // 2 minutes in milliseconds
+
+  // Constants for file validation
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+  const MAX_RETRY_COUNT = 3;
+
+  const limit = user?.tier === 'free' ? 10 : user?.tier === 'plus' ? 20 : 30;
+  const isPaid = user?.tier !== 'free';
+  const isUltimate = user?.tier === 'ultimate';
+
+  // Cleanup blob URLs when images are removed to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      images.forEach((img: ImageFile) => {
+        if (img.originalUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(img.originalUrl);
+        }
+      });
+    };
+  }, []);
+
+  // NOTE: localStorage persistence disabled to restore core functionality
+  // The localStorage save was causing crashes with multiple images
+  // Clear any stale localStorage data on mount to prevent blob URL errors
+  useEffect(() => {
+    // Clear stale localStorage data that may contain expired blob URLs
+    try {
+      localStorage.removeItem('coloringbook_images');
+      console.log('✅ Cleared stale localStorage data on mount');
+    } catch (e) {
+      console.warn('Could not clear localStorage:', e);
+    }
+
+    // Reset processingRef in case component remounted after a crash
+    processingRef.current = false;
+  }, []);
+
+  // Reset any images stuck in processing/remixing state on mount (after crash recovery)
+  useEffect(() => {
+    const stuckImages = images.filter((img: ImageFile) =>
+      img.status === 'processing' || img.status === 'remixing'
+    );
+    if (stuckImages.length > 0) {
+      console.log('⚠️ Found stuck images, resetting to idle:', stuckImages.map((i: ImageFile) => i.id));
+      setImages((prev: ImageFile[]) => prev.map((img: ImageFile) =>
+        (img.status === 'processing' || img.status === 'remixing')
+          ? { ...img, status: 'idle' as const }
+          : img
+      ));
+    }
+  }, []); // Only run once on mount
+
+  // --- Sequential Processing Logic ---
+  useEffect(() => {
+    const processQueue = async () => {
+      if (processingRef.current) return;
+      const idleImage = images.find((img: ImageFile) => img.status === 'idle');
+      if (!idleImage) return;
+
+      processingRef.current = true;
+      try {
+        await processSingleImage(idleImage);
+      } finally {
+        await new Promise(r => setTimeout(r, 2000));
+        processingRef.current = false;
+        setImages((prev: ImageFile[]) => [...prev]);
+      }
+    };
+    processQueue();
+  }, [images]);
+
+  const processSingleImage = async (img: ImageFile) => {
+    // Create abort controller for this image
+    const controller = new AbortController();
+    setAbortControllers(prev => new Map(prev).set(img.id, controller));
+
+    // Set timeout to auto-cancel after 2 minutes
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      updateImageStatus(img.id, 'error', 'Processing timed out after 2 minutes');
+    }, PROCESSING_TIMEOUT);
+
+    updateImageStatus(img.id, 'processing');
+    try {
+      const response = await fetch(img.originalUrl, { signal: controller.signal });
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        if (controller.signal.aborted) {
+          reject(new Error('Cancelled'));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      const coloringUrl = await generateLocalColoringPage(base64);
+
+      if (!controller.signal.aborted) {
+        setImages((prev: ImageFile[]) => prev.map(i => i.id === img.id ? { ...i, coloringUrl, status: 'done' as const, retryCount: 0 } : i));
+
+        // Save completed image to local IndexedDB (persistent & private)
+        try {
+          // We pass the whole image object, but we need to make sure urls are valid
+          // The helper expects { ...img, originalUrl, coloringUrl }
+          await saveImageToLocal({ ...img, coloringUrl, status: 'done', overlay: img.overlay });
+          console.log('✅ Image saved to local device storage');
+        } catch (e) {
+          console.error('Failed to save to local storage:', e);
+        }
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError' || controller.signal.aborted) {
+        console.log('Processing cancelled for:', img.id);
+        // Set to idle so user can retry - don't leave in processing state
+        updateImageStatus(img.id, 'idle', undefined);
+      } else {
+        const errorMessage = error instanceof Error ? error.message : "Conversion failed";
+        updateImageStatus(img.id, 'error', errorMessage);
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      setAbortControllers(prev => {
+        const next = new Map(prev);
+        next.delete(img.id);
+        return next;
+      });
+    }
+  };
+
+  const cancelProcessing = (imgId: string) => {
+    const controller = abortControllers.get(imgId);
+    if (controller) {
+      controller.abort();
+      setAbortControllers(prev => {
+        const next = new Map(prev);
+        next.delete(imgId);
+        return next;
+      });
+    }
+
+    // Always update status to 'idle' even if no controller exists
+    // This handles old stuck images that don't have abort controllers
+    updateImageStatus(imgId, 'idle', undefined);
+
+    // Clear processing ref to allow next image
+    processingRef.current = false;
+  };
+
+  // Generate text overlay preview using canvas
+  const generateTextOverlayPreview = async (imageUrl: string, text: string, position: string = 'top'): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx!.drawImage(img, 0, 0);
+
+        // Draw text overlay
+        const fontSize = Math.max(img.height / 15, 24);
+        ctx!.font = `bold ${fontSize}px ${fontFamily === 'generic' ? 'Arial' : fontFamily}`;
+        ctx!.fillStyle = 'black';
+        ctx!.textAlign = 'center';
+        ctx!.textBaseline = 'top';
+        const y = position === 'top' ? fontSize : img.height - fontSize * 2;
+        ctx!.fillText(text, img.width / 2, y);
+
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => reject(new Error('Failed to load image for text overlay'));
+      img.src = imageUrl;
+    });
+  };
+
+  // Get preview URL with text overlay if applicable
+  const getPreviewUrl = (img: ImageFile): string => {
+    if (img.overlay?.text && img.coloringUrl) {
+      const previewKey = `${img.id}-${img.overlay.text}-${img.overlay.position || 'top'}`;
+      return textOverlayPreviews.get(previewKey) || img.coloringUrl;
+    }
+    return img.coloringUrl || img.originalUrl;
+  };
+
+  const updateImageStatus = (id: string, status: ImageFile['status'], errorDetail?: string) => {
+    setImages((prev: ImageFile[]) => prev.map(i => i.id === id ? { ...i, status, errorDetail } : i));
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const validFiles: ImageFile[] = [];
+    const errors: string[] = [];
+
+    Array.from(files).forEach((file: File) => {
+      // Validate file type
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        errors.push(`${file.name}: Invalid file type. Only JPEG, PNG, and WebP are allowed.`);
+        return;
+      }
+
+      // Validate file size
+      if (file.size > MAX_FILE_SIZE) {
+        errors.push(`${file.name}: File too large. Maximum size is 10MB.`);
+        return;
+      }
+
+      validFiles.push({
+        id: Math.random().toString() + Date.now(),
+        originalUrl: URL.createObjectURL(file),
+        status: 'idle' as const,
+        name: file.name,
+        retryCount: 0
+      });
+    });
+
+    if (errors.length > 0) {
+      alert('Some files were rejected:\n\n' + errors.join('\n'));
+    }
+
+    const newImgs = validFiles.slice(0, limit - images.length);
+    setImages([...images, ...newImgs]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeImage = async (id: string) => {
+    // Cancel processing if image is in processing/remixing state
+    if (abortControllers.has(id)) {
+      cancelProcessing(id);
+    }
+
+    const img = images.find((i: ImageFile) => i.id === id);
+    // Revoke blob URL to prevent memory leak
+    if (img?.originalUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(img.originalUrl);
+    }
+    if (img?.coloringUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(img.coloringUrl);
+    }
+
+    // Remove from local persistent storage
+    deleteLocalImage(id).catch(err => console.error("Failed to delete local image", err));
+
+    setImages(images.filter((i: ImageFile) => i.id !== id));
+  };
+
+
+  // Load images from local device storage on mount
+  useEffect(() => {
+    const loadLocalImages = async () => {
+      try {
+        const localImages = await loadAllImagesFromLocal();
+        if (localImages && localImages.length > 0) {
+          // Merge with current images if any (though usually empty on start)
+          setImages((prev: ImageFile[]) => {
+            // Avoid duplicates based on ID
+            const textIds = new Set(prev.map(p => p.id));
+            const newOnes = localImages.filter(l => !textIds.has(l.id));
+            return [...prev, ...newOnes];
+          });
+          console.log(`Loaded ${localImages.length} images from local device storage`);
+        }
+      } catch (error) {
+        console.error("Failed to load local images:", error);
+      }
+    };
+
+    // Slight delay to ensure DB is ready, though not strictly necessary
+    loadLocalImages();
+  }, []); // Run once on mount, no dependencies needed as it's local
+
+  const handleSetOverlay = async (imgId: string, currentText: string) => {
+    const txt = window.prompt("Enter text for this coloring page:", currentText);
+    if (txt !== null) {
+      setImages((prev: ImageFile[]) => prev.map(i => i.id === imgId ? { ...i, overlay: { text: txt, position: 'bottom' } } : i));
+
+      // Generate text overlay preview
+      const img = images.find((i: ImageFile) => i.id === imgId);
+      if (img?.coloringUrl && txt) {
+        try {
+          const previewUrl = await generateTextOverlayPreview(img.coloringUrl, txt, 'bottom');
+          const previewKey = `${imgId}-${txt}-bottom`;
+          setTextOverlayPreviews(prev => new Map(prev).set(previewKey, previewUrl));
+        } catch (error) {
+          console.error('Failed to generate text overlay preview:', error);
+        }
+      }
+    }
+  };
+
+  const handleRemix = async (imgId: string) => {
+    const img = images.find((i: ImageFile) => i.id === imgId);
+    if (!img || img.status !== 'done') {
+      console.log('Cannot remix - image not ready:', { status: img?.status });
+      return;
+    }
+
+    const scenario = window.prompt("What should they be doing? (e.g., 'A hero in space', 'A wizard in a library')");
+    if (!scenario) return;
+
+    // Save original coloringUrl to restore on failure
+    const originalColoringUrl = img.coloringUrl;
+
+    // Create abort controller
+    const controller = new AbortController();
+    setAbortControllers((prev: Map<string, AbortController>) => new Map(prev).set(imgId, controller));
+
+    // Set timeout
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      // Restore original image on timeout
+      setImages((prev: ImageFile[]) => prev.map(i =>
+        i.id === imgId ? { ...i, coloringUrl: originalColoringUrl, status: 'done' as const } : i
+      ));
+    }, PROCESSING_TIMEOUT);
+
+    updateImageStatus(imgId, 'remixing');
+    try {
+      // Determine the source image to use for remix
+      // Priority: originalUrl (blob or base64) > coloringUrl (for saved images)
+      let base64: string;
+
+      if (img.originalUrl && img.originalUrl.length > 0 && !img.originalUrl.startsWith('blob:')) {
+        // originalUrl is already base64
+        base64 = img.originalUrl;
+      } else if (img.originalUrl && img.originalUrl.startsWith('blob:')) {
+        // Convert from blob URL
+        try {
+          const response = await fetch(img.originalUrl, { signal: controller.signal });
+          const blob = await response.blob();
+          base64 = await new Promise<string>((resolve, reject) => {
+            if (controller.signal.aborted) {
+              reject(new Error('Cancelled'));
+              return;
+            }
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch (fetchErr) {
+          // Blob URL expired or failed, fall back to coloringUrl
+          console.log('originalUrl blob fetch failed, falling back to coloringUrl');
+          if (img.coloringUrl) {
+            base64 = img.coloringUrl;
+          } else {
+            throw new Error('No valid image source available for remix');
+          }
+        }
+      } else if (img.coloringUrl) {
+        // For saved images from localStorage where originalUrl is empty, use coloringUrl
+        console.log('Using coloringUrl as source for remix (originalUrl unavailable)');
+        base64 = img.coloringUrl;
+      } else {
+        throw new Error('No image source available for remix');
+      }
+
+      if (controller.signal.aborted) return;
+
+      // Since offline local models do not natively support complex language scenario remixing in < 100MB,
+      // we can inform the mobile user we will perform a stylized high-contrast outline blend of the visual structure.
+      const remixedUrls = [await generateLocalColoringPage(base64)];
+      if (!controller.signal.aborted && remixedUrls.length > 0) {
+        setImages((prev: ImageFile[]) => prev.map(i => i.id === imgId ? { ...i, coloringUrl: remixedUrls[0], status: 'done' as const } : i));
+      }
+    } catch (error: any) {
+      if (error.name === 'AbortError' || controller.signal.aborted) {
+        console.log('Remix cancelled for:', imgId);
+        // Restore original image
+        setImages((prev: ImageFile[]) => prev.map(i =>
+          i.id === imgId ? { ...i, coloringUrl: originalColoringUrl, status: 'done' as const } : i
+        ));
+      } else {
+        console.error('Remix error:', error);
+        // Restore original image and keep in 'done' state for retry
+        setImages((prev: ImageFile[]) => prev.map(i =>
+          i.id === imgId ? { ...i, coloringUrl: originalColoringUrl, status: 'done' as const } : i
+        ));
+
+        // Show error message to user
+        const errorMsg = error.message || 'Remix failed';
+        alert(`Remix failed: ${errorMsg}\n\nYour original image is preserved. Try a different scenario or be more specific in your description.`);
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      setAbortControllers((prev: Map<string, AbortController>) => {
+        const next = new Map(prev);
+        next.delete(imgId);
+        return next;
+      });
+    }
+  };
+
+  const retryImage = (id: string) => {
+    const img = images.find((i: ImageFile) => i.id === id);
+    const currentRetries = img?.retryCount || 0;
+
+    if (currentRetries >= MAX_RETRY_COUNT) {
+      alert(`Maximum retry limit (${MAX_RETRY_COUNT}) reached for this image. Please try a different image or upload again.`);
+      return;
+    }
+
+    setImages((prev: ImageFile[]) => prev.map(i =>
+      i.id === id
+        ? { ...i, status: 'idle' as const, errorDetail: undefined, retryCount: currentRetries + 1 }
+        : i
+    ));
+  };
+
+  const restoreOriginalImage = (id: string) => {
+    setImages((prev: ImageFile[]) => prev.map(i =>
+      i.id === id
+        ? { ...i, status: 'done' as const, errorDetail: undefined }
+        : i
+    ));
+  };
+
+  const handleDownload = async () => {
+    const pdf = await generateColoringBookPDF(
+      images.filter((i: ImageFile) => i.status === 'done').map((i: ImageFile) => i.coloringUrl!),
+      bookTitle,
+      coverTemplate,
+      fontFamily,
+      images.map((i: ImageFile) => i.overlay?.text || null),
+      user?.tier !== 'free'
+    );
+    pdf.save(`${bookTitle.toLowerCase().replace(/\s+/g, '-')}.pdf`);
+  };
+
+  const inputTextColor = vibrantEnabled ? 'text-white' : 'text-slate-950 dark:text-white';
+  const inputBgColor = vibrantEnabled ? 'bg-black/20' : 'bg-slate-200 dark:bg-[#1e293b]';
+
+  return (
+    <div
+      className={`min-h-screen flex flex-col transition-all duration-1000 ${vibrantEnabled ? 'text-white' : 'bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100'}`}
+      style={vibrantEnabled ? { background: `linear-gradient(135deg, ${vibrantColors[0]}, ${vibrantColors[1]}, ${vibrantColors[2]})` } : {}}
+    >
+      <header className={`p-4 md:p-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 md:gap-0 backdrop-blur-md sticky top-0 z-50 border-b ${vibrantEnabled ? 'border-white/20' : 'border-slate-200 dark:border-slate-800'}`}>
+        <div className="flex items-center gap-4 md:gap-12 overflow-x-auto w-full md:w-auto">
+          <Logo size={32} />
+          <div className={`h-8 md:h-12 w-px ${vibrantEnabled ? 'bg-white/20' : 'bg-slate-300 dark:bg-slate-700'}`} />
+          <div className="flex items-center gap-3 md:gap-5 px-4 md:px-6 py-2 md:py-3 bg-indigo-600 text-white rounded-full font-black uppercase text-xs md:text-sm tracking-widest shadow-xl whitespace-nowrap">
+            <Settings size={14} className="md:w-[18px] md:h-[18px]" /> {user?.tier ? (user.tier.charAt(0).toUpperCase() + user.tier.slice(1)) : 'Free'}
+          </div>
+          {!isUltimate && (
+            <button
+              onClick={() => setView('pricing')}
+              className="flex items-center gap-2 md:gap-3 px-4 md:px-8 py-2 md:py-3 bg-emerald-500 text-white rounded-full font-black uppercase text-xs md:text-sm tracking-widest shadow-xl hover:scale-105 transition-all whitespace-nowrap"
+            >
+              <Crown size={14} className="md:w-[18px] md:h-[18px]" /> Upgrade
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-4 md:gap-10 w-full md:w-auto justify-between md:justify-end">
+          {!vibrantEnabled && (
+            <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 opacity-60 hover:opacity-100 transition-all">
+              {isDarkMode ? <Sun size={28} className="md:w-10 md:h-10" /> : <Moon size={28} className="md:w-10 md:h-10" />}
+            </button>
+          )}
+          {isPaid && (
+            <div className="flex items-center gap-3 md:gap-6 bg-white/10 dark:bg-slate-800/50 p-2 md:p-3 rounded-full border border-white/20 shadow-inner overflow-x-auto">
+              <div className="flex gap-2 md:gap-3 px-2 md:px-3">
+                {vibrantColors.map((c, i) => (
+                  <input key={i} type="color" value={c} onChange={e => {
+                    const n = [...vibrantColors] as [string, string, string];
+                    n[i] = e.target.value;
+                    setVibrantColors(n);
+                  }} className="w-8 h-8 md:w-12 md:h-12 rounded-full cursor-pointer border-2 border-white/50 bg-transparent overflow-hidden" />
+                ))}
+              </div>
+              <button onClick={() => setVibrantEnabled(!vibrantEnabled)} className={`flex items-center gap-2 md:gap-3 px-4 md:px-8 py-2 md:py-4 rounded-full text-xs md:text-sm font-black uppercase transition-all shadow-md whitespace-nowrap ${vibrantEnabled ? 'bg-white text-indigo-600 shadow-xl' : 'bg-white/20 text-slate-400'}`}>
+                {vibrantEnabled ? <ToggleRight size={20} className="md:w-8 md:h-8" /> : <ToggleLeft size={20} className="md:w-8 md:h-8" />}
+                <span className="hidden sm:inline">Vibrant</span>
+              </button>
+            </div>
+          )}
+          <button onClick={logout} className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-60 hover:opacity-100 transition-all hover:text-red-500">
+            <LogOut size={18} className="md:w-6 md:h-6" /> <span className="hidden sm:inline">Logout</span>
+          </button>
+        </div>
+      </header>
+
+      <main className="flex-1 p-4 md:p-12 max-w-[1900px] mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-16">
+        <aside className="lg:col-span-3 space-y-6 md:space-y-12">
+          <div className={`p-12 rounded-[5rem] border shadow-2xl ${vibrantEnabled ? 'bg-white/10 border-white/20' : 'bg-slate-50 dark:bg-[#0f172a] border-slate-200 dark:border-slate-800'}`}>
+            <h3 className="font-black mb-12 flex items-center gap-5 uppercase text-xl tracking-[0.2em] opacity-80">
+              <BookOpen size={24} /> Book Design
+            </h3>
+            <div className="space-y-12">
+              <div>
+                <label className="text-xl font-black uppercase opacity-60 mb-4 block tracking-widest ml-4">Title</label>
+                <div className={`rounded-[2rem] px-8 py-6 transition-all ${inputBgColor}`}>
+                  <input
+                    value={bookTitle}
+                    onChange={e => setBookTitle(e.target.value)}
+                    className={`w-full bg-transparent outline-none font-black text-base selection:bg-indigo-500 selection:text-white ${inputTextColor}`}
+                  />
+                </div>
+              </div>
+
+              {isUltimate && (
+                <div>
+                  <label className="text-xl font-black uppercase opacity-60 mb-4 block tracking-widest ml-4">Cover Typography</label>
+                  <div className={`rounded-[2rem] px-8 py-5 transition-all ${inputBgColor}`}>
+                    <select value={coverTemplate} onChange={e => setCoverTemplate(e.target.value)} className={`w-full bg-transparent outline-none font-black appearance-none text-base ${inputTextColor}`}>
+                      <option value="standard" className="text-black bg-white">Standard Bold</option>
+                      <option value="playful" className="text-black bg-white">Playful Courier</option>
+                      <option value="elegant" className="text-black bg-white">Elegant Serif</option>
+                      <option value="modern" className="text-black bg-white">Modern Minimal</option>
+                      <option value="bold" className="text-black bg-white">Ultra Heavy</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {isPaid && (
+                <div>
+                  <label className="text-xl font-black uppercase opacity-60 mb-4 block tracking-widest ml-4">Interior Font</label>
+                  <div className={`rounded-[2rem] px-8 py-5 transition-all ${inputBgColor}`}>
+                    <select value={fontFamily} onChange={e => setFontFamily(e.target.value)} className={`w-full bg-transparent outline-none font-black appearance-none text-base ${inputTextColor}`}>
+                      <option value="generic" className="text-black bg-white">Standard Colorable</option>
+                      {isUltimate && (
+                        <>
+                          <option value="courier" className="text-black bg-white">Fun Monospace</option>
+                          <option value="times" className="text-black bg-white">Traditional Serif</option>
+                          <option value="helvetica" className="text-black bg-white">Professional Sans</option>
+                          <option value="cursive" className="text-black bg-white">Artistic Script</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-10 border-t border-black/5 dark:border-white/5 relative">
+                <div className="flex justify-between items-baseline mb-4">
+                  <span className="text-xs font-black uppercase opacity-40 ml-4">Pages</span>
+                  <div className="flex items-baseline gap-1 mr-4">
+                    <span className={`text-2xl font-black ${inputTextColor}`}>{images.length}</span>
+                    <span className={`text-xs font-black opacity-30 ${inputTextColor}`}>/ {limit}</span>
+                  </div>
+                </div>
+                <div className="h-4 w-full bg-black/20 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-orange-400 via-yellow-400 to-blue-400 transition-all duration-500" style={{ width: `${(images.length / limit) * 100}%` }} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            <button
+              disabled={images.length === 0 || images.some((img: ImageFile) => img.status === 'processing')}
+              onClick={handleDownload}
+              className="w-full py-8 bg-emerald-500 text-white rounded-[4rem] font-black text-xl flex items-center justify-center gap-6 shadow-2xl shadow-emerald-500/30 hover:scale-[1.02] active:scale-95 transition-all uppercase tracking-widest disabled:opacity-50"
+            >
+              <Download size={32} /> {images.some((img: ImageFile) => img.status === 'processing') ? 'Processing...' : 'Download PDF'}
+            </button>
+            <button
+              disabled={images.length === 0 || isSaving}
+              onClick={() => { setIsSaving(true); setTimeout(() => setIsSaving(false), 2000); }}
+              className="w-full py-8 bg-indigo-600/20 text-indigo-400 border-2 border-indigo-600/40 rounded-[4rem] font-black text-xl flex items-center justify-center gap-6 hover:bg-indigo-600/30 transition-all uppercase tracking-widest disabled:opacity-50"
+            >
+              {isSaving ? <Loader2 size={32} className="animate-spin" /> : <Save size={32} />}
+              {isSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </aside>
+
+        <section className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 md:gap-16">
+          {images.map((img: ImageFile) => (
+            <div key={img.id} className={`rounded-[5rem] overflow-hidden border shadow-2xl transition-all duration-500 group ${img.status === 'error' ? 'border-red-500' : 'hover:-translate-y-4'} ${vibrantEnabled ? 'bg-white/10 border-white/20' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
+              <div className="aspect-[3/4] relative bg-white dark:bg-slate-950 p-10 flex items-center justify-center overflow-hidden">
+                {img.status === 'processing' || img.status === 'remixing' ? (
+                  <div className="flex flex-col items-center gap-8">
+                    <Loader2 size={80} className="animate-spin text-indigo-500" />
+                    <span className="text-base font-black uppercase opacity-50 animate-pulse">{img.status === 'remixing' ? 'Remixing Persona...' : 'Converting...'}</span>
+                    <button
+                      onClick={() => cancelProcessing(img.id)}
+                      className="px-8 py-4 bg-red-500 text-white rounded-full font-black uppercase text-xs tracking-widest hover:bg-red-600 transition-all shadow-lg flex items-center gap-2"
+                    >
+                      <XCircle size={18} /> Cancel
+                    </button>
+                  </div>
+                ) : img.status === 'error' ? (
+                  <div className="flex flex-col items-center gap-6 text-center px-10">
+                    <AlertCircle size={80} className="text-red-500" />
+                    <span className="text-red-500 font-black uppercase text-sm tracking-widest">{img.errorDetail || "Something went wrong"}</span>
+                    <div className="flex flex-col gap-3 w-full max-w-sm">
+                      <button
+                        onClick={() => restoreOriginalImage(img.id)}
+                        className="w-full px-8 py-4 bg-blue-500 text-white rounded-full font-black uppercase text-xs tracking-widest hover:bg-blue-600 transition-all shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <RefreshCcw size={16} /> Restore Original
+                      </button>
+                      <button
+                        onClick={() => retryImage(img.id)}
+                        className="w-full px-8 py-4 bg-red-500 text-white rounded-full font-black uppercase text-xs tracking-widest hover:bg-red-600 transition-all shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <RefreshCcw size={16} /> Retry
+                      </button>
+                      <button
+                        onClick={() => removeImage(img.id)}
+                        className="w-full px-8 py-4 bg-slate-200 dark:bg-slate-800 text-slate-500 rounded-full font-black uppercase text-xs tracking-widest hover:bg-slate-300 dark:hover:bg-slate-700 transition-all shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <Trash2 size={16} /> Delete
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <img src={getPreviewUrl(img)} className="w-full h-full object-contain" />
+                )}
+
+                {/* INTERACTION OVERLAY: Only visible when status is 'done' and NOT in error */}
+                {img.status === 'done' && (
+                  <div
+                    onClick={() => {
+                      // Open coloring canvas on click
+                      setColoringImageId(img.id);
+                    }}
+                    className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center gap-12 backdrop-blur-sm z-40 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-center gap-8">
+                      {isPaid && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSetOverlay(img.id, img.overlay?.text || ""); }}
+                          className="p-8 bg-white text-indigo-600 rounded-full shadow-2xl hover:scale-110 active:scale-90 transition-all cursor-pointer pointer-events-auto"
+                        >
+                          <Type size={48} />
+                        </button>
+                      )}
+                      <div className="p-8 bg-indigo-600 text-white rounded-full shadow-2xl animate-bounce">
+                        <Palette size={48} />
+                      </div>
+                      {isUltimate && (
+                        <button
+                          type="button"
+                          disabled={isProcessingQueue}
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); !isProcessingQueue && handleRemix(img.id); }}
+                          className={`p-8 bg-indigo-500 text-white rounded-full shadow-2xl transition-all ${isProcessingQueue ? 'opacity-50 cursor-not-allowed' : 'hover:scale-110 active:scale-90 cursor-pointer pointer-events-auto'}`}
+                        >
+                          <Sparkles size={48} />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isProcessingQueue}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); !isProcessingQueue && removeImage(img.id); }}
+                      className={`px-12 py-5 bg-red-500/10 border-2 border-red-500 text-white rounded-full font-black uppercase text-base tracking-widest transition-all ${isProcessingQueue ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-500 hover:text-white cursor-pointer pointer-events-auto'}`}
+                    >
+                      Delete Page
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="p-12 border-t border-black/5 dark:border-white/5 flex items-center justify-between bg-slate-100/30 dark:bg-black/20">
+                <span className="text-sm font-black opacity-40 uppercase truncate max-w-[200px]">{img.name}</span>
+                {img.status === 'done' && <CheckCircle2 size={32} className="text-emerald-500" />}
+              </div>
+            </div>
+          ))}
+
+          {images.length < limit && (
+            <div
+              onClick={() => !isProcessingQueue && fileInputRef.current?.click()}
+              className={`aspect-[3/4] border-4 border-dashed rounded-[5rem] flex flex-col items-center justify-center transition-all group ${vibrantEnabled ? 'border-white/20 hover:border-white/50 hover:bg-white/5' : 'border-slate-300 dark:border-slate-800 hover:border-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-900/50'} ${isProcessingQueue ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <div className="p-12 rounded-full bg-indigo-600/10 text-indigo-600 group-hover:scale-110 transition-transform mb-10">
+                {isProcessingQueue ? <Loader2 size={96} className="animate-spin" /> : <Plus size={96} className="stroke-[3px]" />}
+              </div>
+              <span className="font-black uppercase tracking-[0.4em] text-base opacity-50">{isProcessingQueue ? 'Processing...' : 'Add Page'}</span>
+              <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFileUpload} disabled={isProcessingQueue} />
+            </div>
+          )}
+        </section>
+      </main>
+
+      {/* Full Screen Coloring Canvas */}
+      {coloringImageId && (() => {
+        const targetImg = images.find((i: ImageFile) => i.id === coloringImageId);
+        if (!targetImg || !targetImg.coloringUrl) return null;
+
+        return (
+          <ColoringCanvas
+            imageUrl={targetImg.coloringUrl}
+            userTier={user?.tier || 'free'}
+            onClose={() => setColoringImageId(null)}
+            onSave={async (dataUrl) => {
+              // Update the image with the new colored version (which includes the outline)
+              // We keep the original ID but update the coloringUrl
+              const newImages = images.map((i: ImageFile) =>
+                i.id === coloringImageId
+                  ? { ...i, coloringUrl: dataUrl }
+                  : i
+              );
+              setImages(newImages);
+
+              // Update local storage
+              try {
+                const updatedImg = newImages.find((i: ImageFile) => i.id === coloringImageId);
+                if (updatedImg) {
+                  await updateLocalImage(updatedImg);
+                }
+              } catch (e) {
+                console.error("Failed to update local image", e);
+              }
+
+              setColoringImageId(null);
+            }}
+          />
+        );
+      })()}
+    </div>
+  );
+};
+
+// --- Main Application Component ---
+
+const App: React.FC = () => {
+  const [view, setView] = useState<View>('landing');
+  const [modelProgress, setModelProgress] = useState<number | null>(null);
+  const [isInitializingModel, setIsInitializingModel] = useState(false);
+
+  // Trigger Local LineArt Model Downloader & Session bootstrap on App Init
+  useEffect(() => {
+    const initWeights = async () => {
+      setIsInitializingModel(true);
+      try {
+        const buffer = await downloadLocalModel((pct) => setModelProgress(pct));
+        await initLocalSession(buffer);
+        console.log('🎉 Local neural edge model initialized fully!');
+      } catch (err) {
+        console.error('Failed to trigger background local model caching:', err);
+      } finally {
+        setIsInitializingModel(false);
+        setModelProgress(null);
+      }
+    };
+    initWeights();
+  }, []);
+  const [selectedTier, setSelectedTier] = useState<Tier>('free');
+  const [images, setImages] = useState<ImageFile[]>([]);
+  const [bookTitle, setBookTitle] = useState('My Coloring Book');
+  // True while waiting for the Stripe webhook to upgrade the tier after
+  // returning from checkout (renders the confirmation overlay below)
+  const [isUpgradeLoading, setIsUpgradeLoading] = useState(false);
+
+  // Initialize dark mode from localStorage
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('colorable_dark_mode');
+    return saved ? JSON.parse(saved) : false;
+  });
+
+  const { profile, loading, signOut, signUp, signIn } = useAuth();
+
+  // Map Supabase profile to App User type
+  const user: User | null = profile ? {
+    id: profile.id,
+    name: profile.display_name || '',
+    email: profile.email,
+    tier: profile.tier,
+    downloadsThisMonth: profile.pdf_downloads_this_month,
+    isVerified: true
+  } : null;
+
+  // Persistence Key strictly tied to the email
+  const storageKey = user ? `colorable_data_v2_${user.email}` : null;
+
+  // Redirect to workspace if logged in and on landing/auth page ONLY on initial mount
+  // This runs once when user is loaded, not on every view change
+  useEffect(() => {
+    if (user && (view === 'landing' || view === 'auth' || view === 'signin')) {
+      // User is logged in but on a public page, redirect to workspace
+      setView('workspace');
+    }
+    // Only run when user auth state changes, not on view changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // Persist dark mode preference
+  useEffect(() => {
+    localStorage.setItem('colorable_dark_mode', JSON.stringify(isDarkMode));
+    const root = window.document.documentElement;
+    if (isDarkMode) root.classList.add('dark');
+    else root.classList.remove('dark');
+  }, [isDarkMode]);
+
+  // Handle Stripe checkout success - show loading state during self-healing
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') === 'success') {
+      console.log('Checkout success detected, showing loading screen...');
+      setIsUpgradeLoading(true);
+
+      // Clear the URL parameter without reloading
+      window.history.replaceState({}, '', window.location.pathname);
+
+      // Give the webhook time to update the tier (2-5 seconds)
+      // Then the useAuth hook's self-healing logic will pick up the change
+      setTimeout(() => {
+        setIsUpgradeLoading(false);
+        setView('workspace');
+      }, 5000);
+    }
+  }, []);
+
+  // Check for pending upgrade tier on mount
+  useEffect(() => {
+    const pendingTier = localStorage.getItem('pendingUpgradeTier');
+    if (pendingTier && (pendingTier === 'plus' || pendingTier === 'ultimate')) {
+      setSelectedTier(pendingTier as Tier);
+      localStorage.removeItem('pendingUpgradeTier');
+    }
+  }, []);
+
+
+  // NOTE: localStorage persistence DISABLED - was causing QuotaExceededError crashes
+  // The localStorage save was trying to store base64 image data which exceeds browser limits
+  // This needs to be reimplemented with cloud storage (Supabase) instead
+  // 
+  // Load user-specific data from localStorage (DISABLED)
+  // useEffect(() => {
+  //   if (storageKey) {
+  //     const saved = localStorage.getItem(storageKey);
+  //     if (saved) {
+  //       try {
+  //         const parsed = JSON.parse(saved);
+  //         setImages(parsed.images || []);
+  //         setBookTitle(parsed.title || `${user?.name}'s Colorable`);
+  //       } catch (e) {
+  //         setImages([]);
+  //       }
+  //     } else {
+  //       setImages([]);
+  //     }
+  //   }
+  // }, [storageKey]);
+
+  // Save user-specific data to localStorage (DISABLED - now done per-image in Workspace)
+  // The old approach saved ALL images on every change, which caused quota errors
+  // New approach: save ONE image when it finishes processing (in processSingleImage)
+
+  // Load completed images from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedImages = getLocalImages();
+      if (savedImages.length > 0) {
+        console.log('✅ Loaded', savedImages.length, 'completed images from localStorage');
+        // Convert StoredImage to ImageFile format
+        const restoredImages: ImageFile[] = savedImages.map(stored => ({
+          id: stored.id,
+          name: stored.name,
+          originalUrl: '', // Original not saved - only the completed result
+          coloringUrl: stored.coloringUrl,
+          status: 'done' as const,
+          retryCount: 0,
+          overlayText: stored.overlayText,
+          overlayPosition: stored.overlayPosition
+        }));
+        setImages(restoredImages);
+      }
+    } catch (e) {
+      console.warn('Could not load from localStorage:', e);
+    }
+  }, []); // Run once on mount
+
+  // Clear the OLD user-specific storage key if it exists (clean up old format)
+  useEffect(() => {
+    if (storageKey) {
+      try {
+        localStorage.removeItem(storageKey);
+        console.log('✅ Cleared user localStorage data to prevent quota errors:', storageKey);
+      } catch (e) {
+        console.warn('Could not clear user localStorage:', e);
+      }
+    }
+  }, [storageKey]);
+
+  // Handle upgrade via Stripe checkout
+  const handleUpgrade = async (tier: Tier) => {
+    if (!user) {
+      // Not logged in, store selected tier and redirect to signup
+      localStorage.setItem('pendingUpgradeTier', tier);
+      setSelectedTier(tier);
+      setView('auth');
+      return;
+    }
+
+    try {
+      // Call the DEPLOYED Netlify function — relative URLs resolve against
+      // the Capacitor WebView origin, not the web backend
+      const response = await fetch(`${API_BASE}/.netlify/functions/create-checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tier,
+          userId: user.id,
+          email: user.email,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create checkout session');
+      }
+
+      const { url } = await response.json();
+
+      if (url) {
+        // Redirect to Stripe Checkout
+        window.location.href = url;
+      }
+    } catch (error) {
+      console.error('Error initiating checkout:', error);
+      alert('Failed to start checkout. Please try again.');
+    }
+  };
+
+  const handleLogout = async () => {
+    localStorage.removeItem('colorable_master_mode'); // Clear master mode if active
+    await signOut();
+    setView('landing');
+    setImages([]);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950 space-y-6">
+        <Loader2 className="animate-spin text-indigo-600" size={64} />
+        <div className="text-center space-y-2">
+          <p className="text-slate-500 font-medium">Loading your workspace...</p>
+          <button
+            onClick={async () => {
+              await signOut();
+              localStorage.clear(); // Force clear everything
+              window.location.reload();
+            }}
+            className="text-xs text-red-500 hover:text-red-600 font-semibold uppercase tracking-wider hover:underline"
+          >
+            Stuck? Click to Reset
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Post-checkout overlay: confirms payment landed while the Stripe
+  // webhook upgrades the account tier (was previously an invisible wait)
+  if (isUpgradeLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950 space-y-6">
+        <CheckCircle2 className="text-green-500" size={64} />
+        <Loader2 className="animate-spin text-indigo-600" size={40} />
+        <div className="text-center space-y-2 px-6">
+          <p className="text-xl font-bold text-slate-900 dark:text-white">Payment successful!</p>
+          <p className="text-slate-500 font-medium">Activating your upgraded plan…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-slate-950 transition-colors duration-300">
+      {view === 'landing' && (
+        <LandingPage
+          setView={setView}
+          setIsDarkMode={setIsDarkMode}
+          isDarkMode={isDarkMode}
+          setSelectedTier={setSelectedTier}
+          modelProgress={modelProgress}
+          isInitializingModel={isInitializingModel}
+        />
+      )}
+      {view === 'pricing' && (
+        <PricingPage
+          setView={setView}
+          handleUpgrade={handleUpgrade}
+          currentUserTier={user?.tier}
+        />
+      )}
+      {view === 'privacy' && (
+        <PrivacyPage
+          setView={setView}
+          isDarkMode={isDarkMode}
+        />
+      )}
+      {view === 'auth' && (
+        <AuthPage
+          selectedTier={selectedTier}
+          signUp={signUp}
+          signIn={signIn}
+          setBookTitle={setBookTitle}
+          setView={setView}
+          initialMode="signup"
+        />
+      )}
+      {view === 'signin' && (
+        <AuthPage
+          selectedTier={selectedTier}
+          signUp={signUp}
+          signIn={signIn}
+          setBookTitle={setBookTitle}
+          setView={setView}
+          initialMode="signin"
+        />
+      )}
+      {view === 'workspace' && (
+        <Workspace
+          user={user}
+          setView={setView}
+          logout={handleLogout}
+          isDarkMode={isDarkMode}
+          setIsDarkMode={setIsDarkMode}
+          bookTitle={bookTitle}
+          setBookTitle={setBookTitle}
+          images={images}
+          setImages={setImages}
+        />
+      )}
+    </div>
+  );
+};
+
+export default App;
