@@ -46,13 +46,13 @@ const HeroTransformation = () => {
 
   return (
     <div className="flex flex-col md:flex-row items-center justify-center gap-8 md:gap-16 mb-20 w-full max-w-7xl px-6">
-      <div className="relative w-full aspect-square md:w-[450px] md:h-[450px] rounded-[3.5rem] overflow-hidden shadow-2xl transition-transform hover:scale-[1.01] bg-slate-100 border-4 border-white dark:border-slate-800">
+      <div className="relative w-full max-w-[450px] aspect-square md:w-[min(450px,36vw)] md:h-[min(450px,36vw)] rounded-[3.5rem] overflow-hidden shadow-2xl transition-transform hover:scale-[1.01] bg-slate-100 border-4 border-white dark:border-slate-800">
         <img
           src={photoUrl}
           alt="Original Photo"
           className="w-full h-full object-cover"
         />
-        <div className="absolute bottom-10 left-10 bg-white/95 backdrop-blur-md px-8 py-3 rounded-full font-black text-[12px] uppercase tracking-[0.2em] text-slate-900 shadow-lg">Original Photo</div>
+        <div className="absolute bottom-4 left-4 md:bottom-10 md:left-10 bg-white/95 backdrop-blur-md px-4 py-2 md:px-8 md:py-3 rounded-full font-black text-[12px] uppercase tracking-[0.2em] text-slate-900 shadow-lg">Original Photo</div>
       </div>
 
       <div className="flex flex-col items-center gap-3 text-indigo-400">
@@ -66,7 +66,7 @@ const HeroTransformation = () => {
         </span>
       </div>
 
-      <div className="relative w-full aspect-square md:w-[450px] md:h-[450px] rounded-[3.5rem] border-4 border-black dark:border-white bg-white shadow-2xl transition-transform hover:scale-[1.01] overflow-hidden">
+      <div className="relative w-full max-w-[450px] aspect-square md:w-[min(450px,36vw)] md:h-[min(450px,36vw)] rounded-[3.5rem] border-4 border-black dark:border-white bg-white shadow-2xl transition-transform hover:scale-[1.01] overflow-hidden">
         <div className="absolute inset-0 bg-white flex items-center justify-center">
           <img
             src={coloringResultUrl}
@@ -74,7 +74,7 @@ const HeroTransformation = () => {
             className="w-full h-full object-contain p-4"
           />
         </div>
-        <div className="absolute bottom-10 left-10 bg-black text-white px-8 py-3 rounded-full font-black text-[12px] uppercase tracking-[0.2em] shadow-2xl z-10">Colorable View</div>
+        <div className="absolute bottom-4 left-4 md:bottom-10 md:left-10 bg-black text-white px-4 py-2 md:px-8 md:py-3 rounded-full font-black text-[12px] uppercase tracking-[0.2em] shadow-2xl z-10">Colorable View</div>
       </div>
     </div>
   );
@@ -116,11 +116,11 @@ const LandingPage = ({ setView, setIsDarkMode, isDarkMode, setSelectedTier, mode
         </div>
       </nav>
 
-      <div className="flex flex-col items-center text-center px-6 py-28 max-w-[120rem]">
-        <h1 className={`text-8xl md:text-[14rem] font-black mb-16 leading-[0.8] tracking-tighter ${LOGO_GRADIENT}`}>
+      <div className="flex flex-col items-center text-center px-4 sm:px-6 py-12 md:py-28 max-w-[120rem] w-full">
+        <h1 className={`text-5xl sm:text-7xl md:text-8xl lg:text-[10rem] xl:text-[14rem] font-black mb-8 md:mb-16 leading-[0.85] tracking-tighter ${LOGO_GRADIENT}`}>
           Colorable AI
         </h1>
-        <p className={`text-4xl ${subText} mb-24 max-w-6xl font-bold leading-relaxed`}>
+        <p className={`text-xl sm:text-2xl md:text-3xl lg:text-4xl ${subText} mb-12 md:mb-24 max-w-6xl font-bold leading-relaxed`}>
           The world's first AI coloring book engine that preserves exact composition.
           Turning uploaded images into professional line-art in seconds!
         </p>
@@ -144,7 +144,7 @@ const LandingPage = ({ setView, setIsDarkMode, isDarkMode, setSelectedTier, mode
         <div className="mt-4 flex flex-col items-center gap-8">
           <button
             onClick={() => { setSelectedTier('free'); setView('auth'); }}
-            className="px-20 py-8 bg-indigo-600 text-white rounded-[4rem] font-black text-4xl hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all shadow-[0_20px_60px_-15px_rgba(79,70,229,0.5)] uppercase tracking-[0.2em]"
+            className="px-10 py-5 text-2xl md:px-20 md:py-8 md:text-4xl bg-indigo-600 text-white rounded-[4rem] font-black hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all shadow-[0_20px_60px_-15px_rgba(79,70,229,0.5)] uppercase tracking-[0.2em]"
           >
             Try for free
           </button>
@@ -177,7 +177,7 @@ const PricingPage = ({ setView, currentUserTier, handleUpgrade }: any) => {
       </nav>
 
       <div className="flex flex-col items-center mt-12 px-6 text-center max-w-[100rem] w-full">
-        <h2 className="text-7xl md:text-9xl font-black mb-4 text-black dark:text-white tracking-tighter">
+        <h2 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-black mb-4 text-black dark:text-white tracking-tighter">
           {currentUserTier ? 'Upgrade Your Art.' : 'Simple Pricing.'}
         </h2>
         <p className="text-2xl font-bold text-slate-500 dark:text-slate-400 mb-20">Unlock the full power of AI coloring pages.</p>
