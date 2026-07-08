@@ -1,11 +1,17 @@
-import { InferenceSession, Tensor } from 'onnxruntime-web';
+import { InferenceSession, Tensor, env as ortEnv } from 'onnxruntime-web';
 import { API_BASE } from './apiConfig';
 
 // Caches for the model and session so weight loading only happens once
 let cachedSession: InferenceSession | null = null;
 let cachedModelBuffer: ArrayBuffer | null = null;
 
-const ONNX_MODEL_URL = 'https://models.colorableai.com/lineart_simple_quantized.onnx'; // CDN or Play Asset Directory target
+// ONNX runtime wasm ships inside the app bundle (public/ort/) so
+// inference works fully offline once the model is cached.
+ortEnv.wasm.wasmPaths = '/ort/';
+
+// Informative Drawings line-art model — BUNDLED in the app (public/models/),
+// so transforms work fully offline with zero download wait
+const ONNX_MODEL_URL = '/models/lineart.onnx';
 
 // Same transform prompt the web app uses via the Gemini proxy
 const PROMPT_TEMPLATE = `
@@ -201,10 +207,10 @@ async function runLocalOnnxPipeline(base64Image: string): Promise<string> {
           const g = imgData.data[i * 4 + 1];
           const b = imgData.data[i * 4 + 2];
 
-          // Normalize [0, 255] to [-1, 1] as required by LineArt Generative models
-          inputData[i] = (r / 127.5) - 1.0;
-          inputData[width * height + i] = (g / 127.5) - 1.0;
-          inputData[2 * width * height + i] = (b / 127.5) - 1.0;
+          // Normalize [0, 255] to [0, 1] as required by Informative Drawings
+          inputData[i] = r / 255;
+          inputData[width * height + i] = g / 255;
+          inputData[2 * width * height + i] = b / 255;
         }
 
         const inputTensor = new Tensor('float32', inputData, [1, 3, width, height]);
@@ -227,9 +233,8 @@ async function runLocalOnnxPipeline(base64Image: string): Promise<string> {
 
         const outImgData = outCtx.createImageData(width, height);
         for (let i = 0; i < width * height; i++) {
-          // Normalize back to grayscale edge-strength line value
-          const val = (outputData[i] + 1.0) * 127.5;
-          const pixelVal = val > 128 ? 255 : 0; // High contrast PURE black outline / white fill thresholding
+          // Output is a 0..1 line map (1 = white paper, 0 = black ink)
+          const pixelVal = outputData[i] < 0.6 ? 0 : 255; // crisp coloring-book lines
 
           outImgData.data[i * 4] = pixelVal;
           outImgData.data[i * 4 + 1] = pixelVal;
