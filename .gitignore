@@ -7,3 +7,4 @@ android/capacitor-cordova-android-plugins/
 *.log
 .env
 .env.*
+!.env.example
