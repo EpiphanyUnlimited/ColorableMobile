@@ -1,5 +1,5 @@
 # Colorable — Google Play Store Listing Kit
-Package: `com.magiccoloringbook.colorable` · Version 1.0 (versionCode 2) · Epiphany Unlimited, Inc.
+Package: `com.magiccoloringbook.colorable` · Version 1.0 (versionCode 3) · Epiphany Unlimited, Inc.
 
 ---
 
@@ -43,6 +43,12 @@ HOW IT WORKS
 4. Build a book. Collect your pages, give your book a title, and export a
    print-ready PDF coloring book.
 
+SAFE FOR THE WHOLE FAMILY
+
+A neutral age screen runs at first launch. Kids under 13 get Kids Mode: no
+account, no sign-up, nothing collected or transmitted — just photos becoming
+coloring pages, all on the device. A parental gate protects the exit.
+
 MADE FOR COLORING
 
 • On-device AI line art — no upload, no waiting on a server
@@ -51,6 +57,7 @@ MADE FOR COLORING
 • Stylus support with pressure sensitivity
 • Save pages on your device and pick up where you left off
 • Export a full coloring book as a PDF — print it or share it
+• Kids Mode: accountless, fully on-device, parental-gated
 
 YOUR PHOTOS STAY YOURS
 
@@ -86,13 +93,35 @@ Colorable is a product of Epiphany Unlimited, Inc.
 | Contains ads | **No** |
 | In-app purchases | **No** *(the Android build ships no upgrade CTA — App.tsx:971. If Play Billing lands later, flip this and add SKUs.)* |
 
-### Target audience — read before answering the form
+### Target audience & Families compliance  *(mixed-audience app, ages 5+)*
 
-Pick **13 and older** (or 18+). Do NOT include under-13 age groups even though
-coloring appeals to kids: targeting children triggers Google's Families policy
-(no account requirement for kids, teacher-approved review, restricted APIs),
-and Colorable requires an email account. "Appeals to all ages but targeted at
-adults who print pages for their kids" is the honest and compliant answer.
+In **Target audience and content**, select: **5-8, 9-12, 13-15, 16-17, 18 and
+over**. Because under-13 groups are included, the app is reviewed under the
+**Families policy** as a *mixed-audience* app. The build complies as follows:
+
+| Requirement | How Colorable complies |
+|---|---|
+| Neutral age screen before any data collection | First-launch "What year were you born?" gate; answer stored per-device |
+| No personal info from children without parental consent | Under-13 → **Kids Mode**: no account, no email, no signup UI, nothing transmitted |
+| Child data transmission | None — photo processing on-device, artwork stored locally only |
+| Parental gate on exits to non-child experience | "Grown-Ups" button requires a random arithmetic challenge |
+| Ads | None (no ad SDKs at all) |
+| Purchases | None in-app; no external purchase links |
+| Permissions | None sensitive — system photo picker only, no location/contacts/mic |
+| App Set ID / device identifiers | Not collected |
+
+Console answers driven by this:
+- **Target age groups**: check all of 5-8 / 9-12 / 13-15 / 16-17 / 18+
+- **"Could your store listing unintentionally appeal to children?"** — moot; it intentionally does
+- **Participate in Designed for Families**: Yes (app meets Families Policy requirements)
+- **Ads declaration**: app contains no ads
+- **IARC content rating questionnaire**: answer everything "No" (no violence, no user
+  interaction/communication features, no data sharing, no gambling) → expect **Everyone / PEGI 3**
+- **Teacher Approved** program: optional; can apply after launch, not required
+
+Data safety stays as declared above for the 13+ account path; for children the
+app collects **nothing**, which the Children's Privacy section of the policy
+states explicitly.
 
 ---
 
@@ -171,4 +200,5 @@ phone screenshots, so shoot at least 4 even though 2 passes validation.
 - [ ] Supabase: Site URL set to `https://colorableai.netlify.app` (Auth → URL Configuration)
 - [ ] Supabase: custom SMTP configured — the built-in mailer's ~2 emails/hour will strand real users at signup
 - [ ] Netlify env vars set: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (delete-account function), `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+- [ ] Verify on device: fresh install shows the age screen; under-13 year lands in Kids Mode (no login UI); Grown-Ups gate blocks a wrong answer
 - [ ] Upload `android/app/build/outputs/bundle/release/app-release.aab` to the internal testing track first; verify signup → color → delete-account once via the Play-delivered build, then promote

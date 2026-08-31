@@ -427,7 +427,7 @@ const AuthPage = ({ selectedTier, signUp, signIn, setBookTitle, setView, initial
 
 // --- Real Workspace Component ---
 
-const Workspace = ({ user, setView, logout, deleteAccount, isDarkMode, setIsDarkMode, bookTitle, setBookTitle, images, setImages }: any) => {
+const Workspace = ({ user, kidsMode, setView, logout, deleteAccount, isDarkMode, setIsDarkMode, bookTitle, setBookTitle, images, setImages }: any) => {
   // Account-deletion confirm dialog state (Google Play requirement)
   const [showDeleteAccount, setShowDeleteAccount] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -995,17 +995,25 @@ const Workspace = ({ user, setView, logout, deleteAccount, isDarkMode, setIsDark
               </button>
             </div>
           )}
-          <button onClick={logout} className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-60 hover:opacity-100 transition-all hover:text-red-500">
-            <LogOut size={18} className="md:w-6 md:h-6" /> <span className="hidden sm:inline">Logout</span>
-          </button>
-          <button
-            onClick={() => { setShowDeleteAccount(true); setDeleteConfirmText(''); setDeleteAccountError(null); }}
-            title="Delete account"
-            aria-label="Delete account"
-            className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-40 hover:opacity-100 transition-all hover:text-red-600"
-          >
-            <UserX size={18} className="md:w-6 md:h-6" />
-          </button>
+          {kidsMode ? (
+            <button onClick={logout} className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-60 hover:opacity-100 transition-all">
+              <Settings size={18} className="md:w-6 md:h-6" /> <span className="hidden sm:inline">Grown-Ups</span>
+            </button>
+          ) : (
+            <>
+              <button onClick={logout} className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-60 hover:opacity-100 transition-all hover:text-red-500">
+                <LogOut size={18} className="md:w-6 md:h-6" /> <span className="hidden sm:inline">Logout</span>
+              </button>
+              <button
+                onClick={() => { setShowDeleteAccount(true); setDeleteConfirmText(''); setDeleteAccountError(null); }}
+                title="Delete account"
+                aria-label="Delete account"
+                className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-40 hover:opacity-100 transition-all hover:text-red-600"
+              >
+                <UserX size={18} className="md:w-6 md:h-6" />
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -1300,6 +1308,47 @@ const Workspace = ({ user, setView, logout, deleteAccount, isDarkMode, setIsDark
 
 // --- Main Application Component ---
 
+// Neutral age screen (Google Play Families / mixed-audience requirement).
+// Must not hint at which answer unlocks what, and must run before any data
+// collection. The answer is stored per-device so it persists across launches.
+const AgeGate = ({ onPick }: { onPick: (mode: 'kid' | 'full') => void }) => {
+  const thisYear = new Date().getFullYear();
+  const [year, setYear] = useState<string>('');
+
+  const submit = () => {
+    const y = parseInt(year, 10);
+    if (!y || y < thisYear - 120 || y > thisYear) return;
+    const age = thisYear - y;
+    onPick(age < 13 ? 'kid' : 'full');
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950 px-6">
+      <div className="w-full max-w-sm text-center space-y-8">
+        <h1 className="text-4xl font-black text-slate-900 dark:text-white">Welcome to Colorable</h1>
+        <p className="text-slate-500 font-medium">What year were you born?</p>
+        <select
+          value={year}
+          onChange={(e) => setYear(e.target.value)}
+          className="w-full text-center text-2xl font-black p-4 rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:border-indigo-500"
+        >
+          <option value="">Select year</option>
+          {Array.from({ length: 100 }, (_, i) => thisYear - i).map(y => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+        <button
+          onClick={submit}
+          disabled={!year}
+          className="w-full py-4 bg-indigo-600 text-white rounded-full font-black uppercase tracking-widest disabled:opacity-40 hover:bg-indigo-700 transition-all shadow-lg"
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
   const [view, setView] = useState<View>('landing');
   const [modelProgress, setModelProgress] = useState<number | null>(null);
@@ -1344,13 +1393,42 @@ const App: React.FC = () => {
     isVerified: true
   } : null;
 
+  // --- Kids Mode (Play Families compliance) ---
+  // Under-13 users get a fully local, accountless experience: no signup, no
+  // email, nothing transmitted. Local artwork is namespaced under a fixed id.
+  const [ageMode, setAgeMode] = useState<'unknown' | 'kid' | 'full'>(() => {
+    const stored = localStorage.getItem('colorable_age_mode');
+    return stored === 'kid' || stored === 'full' ? stored : 'unknown';
+  });
+  const KID_USER: User = { id: 'kids-local', name: 'Artist', email: '', tier: 'free', downloadsThisMonth: 0, isVerified: true };
+  const effectiveUser: User | null = ageMode === 'kid' ? KID_USER : user;
+
+  // Parental gate: a random arithmetic challenge an early reader can't pass.
+  const exitKidsMode = async () => {
+    const a = Math.floor(Math.random() * 5) + 5;
+    const b = Math.floor(Math.random() * 5) + 4;
+    const answer = window.prompt(`Ask a grown-up to answer: what is ${a} \u00d7 ${b}?`);
+    if (answer !== null && parseInt(answer.trim(), 10) === a * b) {
+      localStorage.removeItem('colorable_age_mode');
+      setAgeMode('unknown');
+      setImages([]);
+      setView('landing');
+    }
+  };
+
+  // Kids Mode never leaves the workspace (privacy stays reachable)
+  useEffect(() => {
+    if (ageMode === 'kid' && view !== 'workspace' && view !== 'privacy') setView('workspace');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ageMode, view]);
+
   // Persistence Key strictly tied to the email
   const storageKey = user ? `colorable_data_v2_${user.email}` : null;
 
   // Redirect to workspace if logged in and on landing/auth page ONLY on initial mount
   // This runs once when user is loaded, not on every view change
   useEffect(() => {
-    if (user && (view === 'landing' || view === 'auth' || view === 'signin')) {
+    if (ageMode !== 'kid' && user && (view === 'landing' || view === 'auth' || view === 'signin')) {
       // User is logged in but on a public page, redirect to workspace
       setView('workspace');
     }
@@ -1394,9 +1472,9 @@ const App: React.FC = () => {
 
   // Load completed images from localStorage on mount
   useEffect(() => {
-    if (!user?.id) return; // No account, no saved images
+    if (!effectiveUser?.id) return; // No account, no saved images
     try {
-      const savedImages = getLocalImages(user.id);
+      const savedImages = getLocalImages(effectiveUser.id);
       if (savedImages.length > 0) {
         console.log('✅ Loaded', savedImages.length, 'completed images from localStorage');
         // Convert StoredImage to ImageFile format
@@ -1415,7 +1493,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.warn('Could not load from localStorage:', e);
     }
-  }, [user?.id]); // Reload when the signed-in account changes
+  }, [effectiveUser?.id]); // Reload when the signed-in account changes
 
   // Clear the OLD user-specific storage key if it exists (clean up old format)
   useEffect(() => {
@@ -1446,7 +1524,11 @@ const App: React.FC = () => {
     return { error };
   };
 
-  if (loading) {
+  if (ageMode === 'unknown') {
+    return <AgeGate onPick={(mode) => { localStorage.setItem('colorable_age_mode', mode); setAgeMode(mode); }} />;
+  }
+
+  if (loading && ageMode !== 'kid') {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950 space-y-6">
         <Loader2 className="animate-spin text-indigo-600" size={64} />
@@ -1507,9 +1589,10 @@ const App: React.FC = () => {
       )}
       {view === 'workspace' && (
         <Workspace
-          user={user}
+          user={effectiveUser}
+          kidsMode={ageMode === 'kid'}
           setView={setView}
-          logout={handleLogout}
+          logout={ageMode === 'kid' ? exitKidsMode : handleLogout}
           deleteAccount={handleDeleteAccount}
           isDarkMode={isDarkMode}
           setIsDarkMode={setIsDarkMode}
