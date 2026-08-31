@@ -1,5 +1,5 @@
 import { InferenceSession, Tensor, env as ortEnv } from 'onnxruntime-web';
-import { API_BASE } from './apiConfig';
+import { Capacitor } from '@capacitor/core';
 
 // Caches for the model and session so weight loading only happens once
 let cachedSession: InferenceSession | null = null;
@@ -13,47 +13,11 @@ ortEnv.wasm.wasmPaths = '/ort/';
 // so transforms work fully offline with zero download wait
 const ONNX_MODEL_URL = '/models/lineart.onnx';
 
-// Same transform prompt the web app uses via the Gemini proxy
-const PROMPT_TEMPLATE = `
-Transform the provided portrait into a PURE black and white coloring book page.
-STRICT RULE: Absolutely NO color. NO grayscale. NO shading. NO shadows. NO backgrounds.
-CRITICAL: Maintain the exact facial features, expressions, and likeness of the person in the image.
-Style Requirements:
-- Use only clean, sharp, black outlines on a pure white background.
-- High contrast line art.
-- Large, clear empty areas for coloring.
-- Do not add any color or artistic textures.
-`;
 
-/**
- * Cloud fallback: transforms the photo through the deployed Gemini proxy —
- * the same engine the web app uses. Engaged whenever the on-device ONNX
- * path is unavailable (model not yet published, download failure, WebView
- * without WASM/WebGPU support, inference error).
- */
-export async function generateColoringPageViaCloud(base64Image: string): Promise<string> {
-  const [header, data] = base64Image.split(',');
-  const mimeType = header?.includes(':') ? header.split(';')[0].split(':')[1] : 'image/jpeg';
-
-  const response = await fetch(`${API_BASE}/.netlify/functions/gemini-proxy`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      image: data ?? base64Image,
-      mimeType,
-      prompt: PROMPT_TEMPLATE,
-      model: 'gemini-2.5-flash-image',
-    }),
-  });
-
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({} as any));
-    throw new Error(errData.error || `Cloud transform failed: ${response.statusText}`);
-  }
-
-  const result = await response.json();
-  return `data:${result.mimeType || 'image/png'};base64,${result.image}`;
-}
+// NOTE: The cloud Gemini fallback was removed from the Android build on
+// purpose (Play Store release). All photo processing is on-device via ONNX;
+// user photos must never leave the device. Do not re-add a network path
+// here without updating the Play Data safety form and privacy policy.
 
 /**
  * Downloads the ONNX model file and reports progress.
@@ -140,7 +104,12 @@ export async function downloadLocalModel(onProgress: (percent: number) => void):
 export async function initLocalSession(modelBuffer: ArrayBuffer): Promise<InferenceSession> {
   if (cachedSession) return cachedSession;
 
+  // Android WebViews advertise WebGPU but Adreno GPU drivers segfault
+  // compiling its compute shaders at first inference (native crash, kills the
+  // process, uncatchable from JS) — so native builds go straight to CPU WASM.
+  const allowWebGPU = !Capacitor.isNativePlatform();
   try {
+    if (!allowWebGPU) throw new Error('WebGPU disabled on native platform');
     // Attempt WebGPU first for instant mobile hardware acceleration
     console.log('⚡ Initializing local ONNX Session with WebGPU acceleration...');
     cachedSession = await InferenceSession.create(modelBuffer, {
@@ -161,17 +130,20 @@ export async function initLocalSession(modelBuffer: ArrayBuffer): Promise<Infere
 }
 
 /**
- * Processes an uploaded photo into line art — LOCAL-FIRST with cloud fallback.
- * Tries the on-device ONNX pipeline; if the model is unavailable or fails
- * (it is not yet published to the CDN), transparently falls back to the
- * deployed Gemini proxy so the app works today.
+ * Processes an uploaded photo into line art — 100% ON-DEVICE.
+ * The Android build never uploads user photos anywhere: if the local ONNX
+ * pipeline fails, we surface a friendly error instead of falling back to
+ * any cloud service. This keeps the Play Store "private & offline" promise
+ * (and the Data safety declaration) literally true.
  */
 export async function generateLocalColoringPage(base64Image: string): Promise<string> {
   try {
     return await runLocalOnnxPipeline(base64Image);
   } catch (err) {
-    console.warn('⚠️ On-device transform unavailable, using cloud fallback:', err);
-    return generateColoringPageViaCloud(base64Image);
+    console.error('❌ On-device transform failed:', err);
+    throw new Error(
+      'The on-device AI could not process this photo. Please try a different photo, or restart the app to reload the AI model. (Your photo never leaves your device.)'
+    );
   }
 }
 
@@ -188,8 +160,13 @@ async function runLocalOnnxPipeline(base64Image: string): Promise<string> {
     img.src = base64Image;
     img.onload = async () => {
       try {
-        const width = 512;
-        const height = 512;
+        // Preserve the photo's aspect ratio at up to 768px on the long side
+        // (dims rounded to /4 for the conv net). Fixed 512x512 squashing was
+        // the main quality killer: distortion + lost detail.
+        const MAX_SIDE = 768;
+        const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+        const width = Math.max(64, Math.round((img.width * scale) / 4) * 4);
+        const height = Math.max(64, Math.round((img.height * scale) / 4) * 4);
 
         const canvas = document.createElement('canvas');
         canvas.width = width;
@@ -200,7 +177,7 @@ async function runLocalOnnxPipeline(base64Image: string): Promise<string> {
         ctx.drawImage(img, 0, 0, width, height);
         const imgData = ctx.getImageData(0, 0, width, height);
 
-        // Preprocess image to tensor format: [1, 3, 512, 512] Normalized
+        // Preprocess image to tensor format: [1, 3, H, W] Normalized
         const inputData = new Float32Array(3 * width * height);
         for (let i = 0; i < width * height; i++) {
           const r = imgData.data[i * 4];
@@ -213,7 +190,8 @@ async function runLocalOnnxPipeline(base64Image: string): Promise<string> {
           inputData[2 * width * height + i] = b / 255;
         }
 
-        const inputTensor = new Tensor('float32', inputData, [1, 3, width, height]);
+        // NCHW: dims are [batch, channels, HEIGHT, WIDTH]
+        const inputTensor = new Tensor('float32', inputData, [1, 3, height, width]);
         const feed: { [key: string]: Tensor } = {};
         const inputNames = session.inputNames;
         feed[inputNames[0]] = inputTensor;
@@ -224,17 +202,28 @@ async function runLocalOnnxPipeline(base64Image: string): Promise<string> {
         const outputTensor = outputMap[outputName];
         const outputData = outputTensor.data as Float32Array;
 
-        // Postprocess tensor back to black and white canvas pixel values
+        // Postprocess tensor back to black and white canvas pixel values.
+        // Read dims from the tensor itself ([..., H, W]) so a layout mismatch
+        // can never silently skew the image again.
+        const outH = Number(outputTensor.dims[outputTensor.dims.length - 2]);
+        const outW = Number(outputTensor.dims[outputTensor.dims.length - 1]);
         const outCanvas = document.createElement('canvas');
-        outCanvas.width = width;
-        outCanvas.height = height;
+        outCanvas.width = outW;
+        outCanvas.height = outH;
         const outCtx = outCanvas.getContext('2d');
         if (!outCtx) throw new Error('Could not create output canvas context');
 
-        const outImgData = outCtx.createImageData(width, height);
-        for (let i = 0; i < width * height; i++) {
-          // Output is a 0..1 line map (1 = white paper, 0 = black ink)
-          const pixelVal = outputData[i] < 0.6 ? 0 : 255; // crisp coloring-book lines
+        const outImgData = outCtx.createImageData(outW, outH);
+        for (let i = 0; i < outW * outH; i++) {
+          // Output is a 0..1 line map (1 = white paper, 0 = black ink).
+          // Smoothstep ramp instead of a hard 1-bit threshold: lines stay
+          // dark and paper white, but stroke edges keep anti-aliasing
+          // (the hard cutoff produced jagged fax-like output).
+          const x = outputData[i];
+          let t = (x - 0.45) / (0.8 - 0.45);
+          t = Math.max(0, Math.min(1, t));
+          t = t * t * (3 - 2 * t);
+          const pixelVal = Math.round(t * 255);
 
           outImgData.data[i * 4] = pixelVal;
           outImgData.data[i * 4 + 1] = pixelVal;

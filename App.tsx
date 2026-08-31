@@ -4,10 +4,11 @@ import {
   Plus, Download, Trash2, Palette, Loader2, Sparkles,
   Moon, Sun, XCircle, CheckCircle2, AlertCircle, RefreshCcw,
   ShieldCheck, Zap, Crown, ArrowRight, Mail, ChevronLeft, ToggleLeft, ToggleRight,
-  Type, Settings, BookOpen, Save, User as UserIcon, Wand2, LogOut, Lock
+  Type, Settings, BookOpen, Save, User as UserIcon, Wand2, LogOut, Lock, UserX
 } from 'lucide-react';
 import { ImageFile, Tier, User, View } from './types';
-import { API_BASE } from './services/apiConfig';
+import { Capacitor } from '@capacitor/core';
+import { Camera } from '@capacitor/camera';
 import { generateLocalColoringPage, downloadLocalModel, initLocalSession } from './services/geminiService';
 import { generateColoringBookPDF } from './utils/pdfUtils';
 import { useAuth } from './src/hooks/useAuth';
@@ -20,14 +21,14 @@ import { saveImageToLocal, loadAllImagesFromLocal, deleteLocalImage, updateLocal
 const LOGO_GRADIENT = "bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-yellow-500 via-green-500 to-blue-500";
 
 const Logo = ({ size = 64 }: { size?: number }) => (
-  <div className="flex items-center gap-6">
+  <div className="flex items-center gap-[0.6em] text-[clamp(1.35rem,4.5vw,3rem)]">
     <img
       src="/favicon.png"
       alt="Colorable AI"
-      style={{ width: size * 1.5, height: size * 1.5 }}
-      className="object-contain drop-shadow-2xl rounded-2xl"
+      style={{ maxWidth: size * 1.5, maxHeight: size * 1.5 }}
+      className="object-contain drop-shadow-2xl rounded-2xl w-[1.6em] h-[1.6em]"
     />
-    <span style={{ fontSize: '3rem' }} className={`font-black tracking-tight ${LOGO_GRADIENT}`}>Colorable AI</span>
+    <span className={`font-black tracking-tight whitespace-nowrap ${LOGO_GRADIENT}`}>Colorable AI</span>
   </div>
 );
 
@@ -39,8 +40,11 @@ const TIER_RANK: Record<Tier, number> = {
 
 // --- Hero Transformation Component with Static Demo Images ---
 const HeroTransformation = () => {
-  // Using static images instead of live AI generation to avoid API quota issues
-  const photoUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=900";
+  // Offline-first: the bundled photo ships with the app so the hero works
+  // with no internet. If the local file is missing (dev), fall back to the
+  // original Unsplash source.
+  const photoUrl = "/assets/hero-photo.jpg";
+  const photoFallbackUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=900";
   // This is the pre-generated coloring page result
   const coloringResultUrl = "/assets/hero-coloring.png";
 
@@ -51,6 +55,10 @@ const HeroTransformation = () => {
           src={photoUrl}
           alt="Original Photo"
           className="w-full h-full object-cover"
+          onError={(e) => {
+            const img = e.currentTarget;
+            if (img.src !== photoFallbackUrl) img.src = photoFallbackUrl;
+          }}
         />
         <div className="absolute bottom-4 left-4 md:bottom-10 md:left-10 bg-white/95 backdrop-blur-md px-4 py-2 md:px-8 md:py-3 rounded-full font-black text-[12px] uppercase tracking-[0.2em] text-slate-900 shadow-lg">Original Photo</div>
       </div>
@@ -110,14 +118,13 @@ const LandingPage = ({ setView, setIsDarkMode, isDarkMode, setSelectedTier, mode
           <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-2 md:p-3 text-slate-500 hover:text-indigo-600 transition-colors">
             {isDarkMode ? <Sun size={24} className="md:w-8 md:h-8" /> : <Moon size={24} className="md:w-8 md:h-8" />}
           </button>
-          <button onClick={() => setView('pricing')} className={`${contrastText} font-black hover:text-indigo-600 transition-colors uppercase text-xs md:text-sm tracking-widest hidden sm:inline-block`}>Pricing</button>
           <button onClick={() => setView('privacy')} className={`${contrastText} font-black hover:text-indigo-600 transition-colors uppercase text-xs md:text-sm tracking-widest hidden sm:inline-block`}>Privacy</button>
           <button onClick={() => { setSelectedTier('free'); setView('signin'); }} className="px-4 py-2 md:px-10 md:py-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full font-black hover:scale-105 transition-all shadow-lg text-sm md:text-lg uppercase tracking-wider">Login</button>
         </div>
       </nav>
 
       <div className="flex flex-col items-center text-center px-4 sm:px-6 py-12 md:py-28 max-w-[120rem] w-full">
-        <h1 className={`text-5xl sm:text-7xl md:text-8xl lg:text-[10rem] xl:text-[14rem] font-black mb-8 md:mb-16 leading-[0.85] tracking-tighter ${LOGO_GRADIENT}`}>
+        <h1 className={`text-[clamp(2.6rem,13vw,13.5rem)] font-black mb-8 md:mb-16 leading-[0.85] tracking-tighter ${LOGO_GRADIENT}`}>
           Colorable AI
         </h1>
         <p className={`text-xl sm:text-2xl md:text-3xl lg:text-4xl ${subText} mb-12 md:mb-24 max-w-6xl font-bold leading-relaxed`}>
@@ -149,74 +156,6 @@ const LandingPage = ({ setView, setIsDarkMode, isDarkMode, setSelectedTier, mode
             Try for free
           </button>
           <p className="text-xl font-bold text-slate-400">Join thousands of artists today</p>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const PricingPage = ({ setView, currentUserTier, handleUpgrade }: any) => {
-  const plans = [
-    { tier: 'free', name: 'Free Forever', price: 0, icon: <Zap className="text-yellow-500" />, features: ['10 pages per book', '10 downloads per month', 'Basic Coloring Tools', 'Basic Portrait conversion'] },
-    { tier: 'plus', name: 'Plus Plan', price: 9, icon: <ShieldCheck className="text-indigo-500" />, features: ['20 pages per book', 'Unlimited downloads', '3 devices', 'Advanced Brushes & Textures', 'Pressure Sensitivity', '1 Colorable Font', 'Vibrant Workspace'] },
-    { tier: 'ultimate', name: 'Ultimate Plan', price: 15, icon: <Crown className="text-emerald-500" />, features: ['30 pages per book', 'AI Scenario Remixing', '5 devices', 'Professional Stencil Packs', 'Custom Color Palettes', '5 Custom Fonts'], trial: '3-Day Free Trial' }
-  ];
-
-  const filteredPlans = currentUserTier
-    ? plans.filter(p => TIER_RANK[p.tier as Tier] > TIER_RANK[currentUserTier as Tier])
-    : plans;
-
-  return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center pb-20">
-      <nav className="w-full max-w-7xl flex justify-between items-center px-6 py-10 sticky top-0 bg-white/80 dark:bg-slate-950/80 backdrop-blur-md z-50">
-        <button onClick={() => setView(currentUserTier ? 'workspace' : 'landing')} className="flex items-center gap-2 font-black text-slate-500 hover:text-indigo-600 transition-colors uppercase text-sm tracking-widest">
-          <ChevronLeft size={24} /> Back
-        </button>
-        <Logo size={48} />
-        <div className="w-20" />
-      </nav>
-
-      <div className="flex flex-col items-center mt-12 px-6 text-center max-w-[100rem] w-full">
-        <h2 className="text-4xl sm:text-6xl md:text-8xl lg:text-9xl font-black mb-4 text-black dark:text-white tracking-tighter">
-          {currentUserTier ? 'Upgrade Your Art.' : 'Simple Pricing.'}
-        </h2>
-        <p className="text-2xl font-bold text-slate-500 dark:text-slate-400 mb-20">Unlock the full power of AI coloring pages.</p>
-
-        <div className="flex flex-col lg:flex-row items-stretch justify-center gap-10 w-full max-w-6xl mx-auto px-6">
-          {filteredPlans.length === 0 ? (
-            <div className="w-full max-w-3xl p-24 bg-white dark:bg-slate-900 rounded-[5rem] border-4 border-indigo-600 shadow-2xl mx-auto">
-              <Crown size={96} className="mx-auto text-emerald-500 mb-10" />
-              <h3 className="text-6xl font-black mb-6 text-black dark:text-white">You are at the Top Tier!</h3>
-              <p className="text-2xl font-bold text-slate-500">You already have access to all ultimate features.</p>
-            </div>
-          ) : filteredPlans.map((p) => (
-            <div key={p.tier} className="flex-1 bg-white dark:bg-slate-900/50 p-14 rounded-[4rem] border border-slate-200 dark:border-slate-800 hover:border-indigo-600 hover:shadow-2xl transition-all text-left flex flex-col group relative overflow-hidden min-w-[320px] max-w-md mx-auto">
-              <div className="absolute top-0 right-0 p-10 opacity-10 group-hover:scale-110 transition-transform">{p.icon}</div>
-              {p.trial && (
-                <div className="absolute top-6 left-6 bg-emerald-500 text-white px-6 py-2 rounded-full font-black text-sm uppercase tracking-widest">
-                  {p.trial}
-                </div>
-              )}
-              <h3 className="text-4xl font-black mb-3 uppercase text-black dark:text-white tracking-tight">{p.name}</h3>
-              <div className="flex items-baseline gap-2 mb-10">
-                <span className="text-6xl font-black text-black dark:text-white">${p.price}</span>
-                <span className="text-slate-400 font-bold text-xl">/month</span>
-              </div>
-              <ul className="space-y-6 mb-16 flex-1">
-                {p.features.map(f => (
-                  <li key={f} className="font-bold flex gap-5 items-center text-slate-700 dark:text-slate-200 text-xl">
-                    <CheckCircle2 size={24} className="text-emerald-500 flex-shrink-0" /> {f}
-                  </li>
-                ))}
-              </ul>
-              <button
-                onClick={() => handleUpgrade(p.tier as Tier)}
-                className="w-full py-7 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-[2.5rem] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all shadow-xl text-xl"
-              >
-                {currentUserTier ? 'Upgrade Now' : 'Select Plan'}
-              </button>
-            </div>
-          ))}
         </div>
       </div>
     </div>
@@ -287,8 +226,10 @@ const PrivacyPage = ({ setView }: { setView: (view: any) => void; isDarkMode: bo
         <section className="mb-12">
           <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>💳 Payments</h2>
           <p className={subText + " text-lg"}>
-            Payment processing is handled by <a href="https://stripe.com/privacy" className="text-indigo-600 hover:underline">Stripe</a>.
-            We do not store your credit card information on our servers. Stripe handles all payment data securely.
+            This app does not process payments and contains no in-app purchases.
+            If your account has a subscription that was purchased on our website, that payment was processed
+            by <a href="https://stripe.com/privacy" className="text-indigo-600 hover:underline">Stripe</a>;
+            we never see or store your card details.
           </p>
         </section>
 
@@ -308,9 +249,9 @@ const PrivacyPage = ({ setView }: { setView: (view: any) => void; isDarkMode: bo
         <section className="mb-12">
           <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>🤖 AI Processing</h2>
           <p className={subText + " text-lg"}>
-            Images you upload are processed by Google's Gemini AI to generate coloring book line art.
-            Google Gemini's privacy policy applies to this processing. Your images are sent to Google only during generation
-            and are not permanently stored by Colorable AI or Google beyond what's necessary for processing.
+            All photo-to-coloring-page conversion happens 100% on your device, using an AI model that ships
+            inside the app. Your photos are never uploaded to our servers or to any third party — coloring page
+            generation works even with no internet connection.
           </p>
         </section>
 
@@ -365,15 +306,6 @@ const AuthPage = ({ selectedTier, signUp, signIn, setBookTitle, setView, initial
         }
 
       } else {
-        // Check for MASTER USER CREDENTIALS (Bypass)
-        if (userEmail === 'M@$t3r' && password === 'U$$$3r') {
-          console.log('🕶️ MASTER CREDENTIALS DETECTED');
-          localStorage.setItem('colorable_master_mode', 'true');
-          // Force reload to pick up the new mode in useAuth hook
-          window.location.reload();
-          return;
-        }
-
         const { error } = await signIn(userEmail, password);
         if (error) throw error;
       }
@@ -495,7 +427,23 @@ const AuthPage = ({ selectedTier, signUp, signIn, setBookTitle, setView, initial
 
 // --- Real Workspace Component ---
 
-const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle, setBookTitle, images, setImages }: any) => {
+const Workspace = ({ user, setView, logout, deleteAccount, isDarkMode, setIsDarkMode, bookTitle, setBookTitle, images, setImages }: any) => {
+  // Account-deletion confirm dialog state (Google Play requirement)
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+
+  const confirmDeleteAccount = async () => {
+    setDeletingAccount(true);
+    setDeleteAccountError(null);
+    const { error } = await deleteAccount();
+    if (error) {
+      setDeleteAccountError(error.message);
+      setDeletingAccount(false);
+    }
+    // On success the app root navigates back to the landing page.
+  };
   const [isSaving, setIsSaving] = useState(false);
   const [vibrantEnabled, setVibrantEnabled] = useState(() => {
     return localStorage.getItem('colorable_vibrant_enabled') === 'true';
@@ -524,6 +472,10 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
   const [abortControllers, setAbortControllers] = useState<Map<string, AbortController>>(new Map());
   const [textOverlayPreviews, setTextOverlayPreviews] = useState<Map<string, string>>(new Map());
   const [coloringImageId, setColoringImageId] = useState<string | null>(null);
+  // Touch flow: first tap on a tile reveals the action overlay; actions are
+  // explicit buttons. Prevents blind taps hitting invisible hover controls.
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 
   // Check if any image is currently processing or remixing
   const isProcessingQueue = images.some((img: ImageFile) => img.status === 'processing' || img.status === 'remixing');
@@ -636,8 +588,10 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
         try {
           // We pass the whole image object, but we need to make sure urls are valid
           // The helper expects { ...img, originalUrl, coloringUrl }
-          await saveImageToLocal({ ...img, coloringUrl, status: 'done', overlay: img.overlay });
-          console.log('✅ Image saved to local device storage');
+          if (user?.id) {
+            await saveImageToLocal(user.id, { ...img, coloringUrl, status: 'done', overlay: img.overlay });
+            console.log('✅ Image saved to local device storage');
+          }
         } catch (e) {
           console.error('Failed to save to local storage:', e);
         }
@@ -649,6 +603,7 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
         updateImageStatus(img.id, 'idle', undefined);
       } else {
         const errorMessage = error instanceof Error ? error.message : "Conversion failed";
+        console.error('❌ Processing failed:', img.name, '|', errorMessage, '|', error?.stack || error);
         updateImageStatus(img.id, 'error', errorMessage);
       }
     } finally {
@@ -722,6 +677,39 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
     setImages((prev: ImageFile[]) => prev.map(i => i.id === id ? { ...i, status, errorDetail } : i));
   };
 
+  // On Android the WebView's <input type=file> chooser can lose its result
+  // when the activity is stopped behind the system photo picker, so native
+  // platforms go through the Camera plugin instead (photos stay on-device).
+  const pickImagesNative = async () => {
+    try {
+      const result = await Camera.pickImages({ quality: 90 });
+      const validFiles: ImageFile[] = result.photos.map(photo => ({
+        id: Math.random().toString() + Date.now(),
+        originalUrl: photo.webPath!,
+        status: 'idle' as const,
+        name: `photo.${photo.format || 'jpeg'}`,
+        retryCount: 0
+      })).filter(f => f.originalUrl);
+      const newImgs = validFiles.slice(0, limit - images.length);
+      if (newImgs.length > 0) setImages([...images, ...newImgs]);
+    } catch (e: any) {
+      // User cancelled the picker — not an error
+      if (!/cancel/i.test(e?.message || '')) {
+        console.error('Native image pick failed:', e?.message || e);
+        alert('Could not open the photo picker. Please try again.');
+      }
+    }
+  };
+
+  const handleAddPage = () => {
+    if (isProcessingQueue) return;
+    if (Capacitor.isNativePlatform()) {
+      pickImagesNative();
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -776,7 +764,7 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
     }
 
     // Remove from local persistent storage
-    deleteLocalImage(id).catch(err => console.error("Failed to delete local image", err));
+    if (user?.id) deleteLocalImage(user.id, id).catch(err => console.error("Failed to delete local image", err));
 
     setImages(images.filter((i: ImageFile) => i.id !== id));
   };
@@ -784,9 +772,10 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
 
   // Load images from local device storage on mount
   useEffect(() => {
+    if (!user?.id) return; // No account, no local library
     const loadLocalImages = async () => {
       try {
-        const localImages = await loadAllImagesFromLocal();
+        const localImages = await loadAllImagesFromLocal(user.id);
         if (localImages && localImages.length > 0) {
           // Merge with current images if any (though usually empty on start)
           setImages((prev: ImageFile[]) => {
@@ -804,7 +793,7 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
 
     // Slight delay to ensure DB is ready, though not strictly necessary
     loadLocalImages();
-  }, []); // Run once on mount, no dependencies needed as it's local
+  }, [user?.id]); // Reload when the signed-in account changes
 
   const handleSetOverlay = async (imgId: string, currentText: string) => {
     const txt = window.prompt("Enter text for this coloring page:", currentText);
@@ -979,14 +968,9 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
           <div className="flex items-center gap-3 md:gap-5 px-4 md:px-6 py-2 md:py-3 bg-indigo-600 text-white rounded-full font-black uppercase text-xs md:text-sm tracking-widest shadow-xl whitespace-nowrap">
             <Settings size={14} className="md:w-[18px] md:h-[18px]" /> {user?.tier ? (user.tier.charAt(0).toUpperCase() + user.tier.slice(1)) : 'Free'}
           </div>
-          {!isUltimate && (
-            <button
-              onClick={() => setView('pricing')}
-              className="flex items-center gap-2 md:gap-3 px-4 md:px-8 py-2 md:py-3 bg-emerald-500 text-white rounded-full font-black uppercase text-xs md:text-sm tracking-widest shadow-xl hover:scale-105 transition-all whitespace-nowrap"
-            >
-              <Crown size={14} className="md:w-[18px] md:h-[18px]" /> Upgrade
-            </button>
-          )}
+          {/* Play Store build: no in-app upgrade CTA. Tier upgrades are not
+              purchasable in the Android app (Play payments policy) — existing
+              subscribers get their tier automatically after sign-in. */}
         </div>
         <div className="flex items-center gap-4 md:gap-10 w-full md:w-auto justify-between md:justify-end">
           {!vibrantEnabled && (
@@ -1013,6 +997,14 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
           )}
           <button onClick={logout} className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-60 hover:opacity-100 transition-all hover:text-red-500">
             <LogOut size={18} className="md:w-6 md:h-6" /> <span className="hidden sm:inline">Logout</span>
+          </button>
+          <button
+            onClick={() => { setShowDeleteAccount(true); setDeleteConfirmText(''); setDeleteAccountError(null); }}
+            title="Delete account"
+            aria-label="Delete account"
+            className="flex items-center gap-2 font-black uppercase text-xs md:text-sm tracking-widest opacity-40 hover:opacity-100 transition-all hover:text-red-600"
+          >
+            <UserX size={18} className="md:w-6 md:h-6" />
           </button>
         </div>
       </header>
@@ -1106,7 +1098,10 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
         <section className="lg:col-span-9 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 md:gap-16">
           {images.map((img: ImageFile) => (
             <div key={img.id} className={`rounded-[5rem] overflow-hidden border shadow-2xl transition-all duration-500 group ${img.status === 'error' ? 'border-red-500' : 'hover:-translate-y-4'} ${vibrantEnabled ? 'bg-white/10 border-white/20' : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
-              <div className="aspect-[3/4] relative bg-white dark:bg-slate-950 p-10 flex items-center justify-center overflow-hidden">
+              <div
+                className="aspect-[3/4] relative bg-white dark:bg-slate-950 p-10 flex items-center justify-center overflow-hidden"
+                onClick={() => { if (isTouchDevice && img.status === 'done' && selectedImageId !== img.id) setSelectedImageId(img.id); }}
+              >
                 {img.status === 'processing' || img.status === 'remixing' ? (
                   <div className="flex flex-col items-center gap-8">
                     <Loader2 size={80} className="animate-spin text-indigo-500" />
@@ -1136,7 +1131,7 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
                         <RefreshCcw size={16} /> Retry
                       </button>
                       <button
-                        onClick={() => removeImage(img.id)}
+                        onClick={() => { if (window.confirm('Delete this page? This cannot be undone.')) removeImage(img.id); }}
                         className="w-full px-8 py-4 bg-slate-200 dark:bg-slate-800 text-slate-500 rounded-full font-black uppercase text-xs tracking-widest hover:bg-slate-300 dark:hover:bg-slate-700 transition-all shadow-lg flex items-center justify-center gap-2"
                       >
                         <Trash2 size={16} /> Delete
@@ -1150,11 +1145,12 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
                 {/* INTERACTION OVERLAY: Only visible when status is 'done' and NOT in error */}
                 {img.status === 'done' && (
                   <div
-                    onClick={() => {
-                      // Open coloring canvas on click
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isTouchDevice) { setSelectedImageId(null); return; } // tap off the buttons dismisses
                       setColoringImageId(img.id);
                     }}
-                    className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center gap-12 backdrop-blur-sm z-40 cursor-pointer"
+                    className={`absolute inset-0 bg-slate-950/40 transition-all flex flex-col items-center justify-center gap-12 backdrop-blur-sm z-40 cursor-pointer ${selectedImageId === img.id ? 'opacity-100' : `opacity-0 pointer-events-none ${isTouchDevice ? '' : 'group-hover:opacity-100 group-hover:pointer-events-auto'}`}`}
                   >
                     <div className="flex items-center justify-center gap-8">
                       {isPaid && (
@@ -1166,9 +1162,13 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
                           <Type size={48} />
                         </button>
                       )}
-                      <div className="p-8 bg-indigo-600 text-white rounded-full shadow-2xl animate-bounce">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedImageId(null); setColoringImageId(img.id); }}
+                        className="p-8 bg-indigo-600 text-white rounded-full shadow-2xl animate-bounce hover:scale-110 active:scale-90 transition-all cursor-pointer pointer-events-auto"
+                      >
                         <Palette size={48} />
-                      </div>
+                      </button>
                       {isUltimate && (
                         <button
                           type="button"
@@ -1183,7 +1183,7 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
                     <button
                       type="button"
                       disabled={isProcessingQueue}
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); !isProcessingQueue && removeImage(img.id); }}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (!isProcessingQueue && window.confirm('Delete this page? This cannot be undone.')) { setSelectedImageId(null); removeImage(img.id); } }}
                       className={`px-12 py-5 bg-red-500/10 border-2 border-red-500 text-white rounded-full font-black uppercase text-base tracking-widest transition-all ${isProcessingQueue ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-500 hover:text-white cursor-pointer pointer-events-auto'}`}
                     >
                       Delete Page
@@ -1200,7 +1200,7 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
 
           {images.length < limit && (
             <div
-              onClick={() => !isProcessingQueue && fileInputRef.current?.click()}
+              onClick={handleAddPage}
               className={`aspect-[3/4] border-4 border-dashed rounded-[5rem] flex flex-col items-center justify-center transition-all group ${vibrantEnabled ? 'border-white/20 hover:border-white/50 hover:bg-white/5' : 'border-slate-300 dark:border-slate-800 hover:border-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-900/50'} ${isProcessingQueue ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             >
               <div className="p-12 rounded-full bg-indigo-600/10 text-indigo-600 group-hover:scale-110 transition-transform mb-10">
@@ -1212,6 +1212,52 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
           )}
         </section>
       </main>
+
+      {/* Delete Account confirmation (Google Play requirement) */}
+      {showDeleteAccount && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6">
+          <div className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-[2.5rem] shadow-2xl max-w-md w-full p-8 md:p-10">
+            <div className="flex items-center gap-3 mb-4 text-red-600">
+              <UserX size={28} />
+              <h3 className="text-2xl font-black">Delete account?</h3>
+            </div>
+            <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+              This permanently deletes your Colorable account and profile from our servers,
+              and removes all artwork saved on this device. <strong className="text-slate-900 dark:text-white">This cannot be undone.</strong>
+            </p>
+            <label className="block text-xs font-black uppercase tracking-widest opacity-60 mb-2">
+              Type DELETE to confirm
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder="DELETE"
+              autoCapitalize="characters"
+              className="w-full px-5 py-3 mb-4 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-black tracking-widest outline-none focus:border-red-500"
+            />
+            {deleteAccountError && (
+              <p className="text-red-500 text-sm font-bold mb-4">{deleteAccountError}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteAccount(false)}
+                disabled={deletingAccount}
+                className="flex-1 py-3 rounded-full font-black uppercase text-sm tracking-widest bg-slate-200 dark:bg-slate-800 hover:opacity-80 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteAccount}
+                disabled={deleteConfirmText.trim().toUpperCase() !== 'DELETE' || deletingAccount}
+                className="flex-1 py-3 rounded-full font-black uppercase text-sm tracking-widest bg-red-600 text-white hover:bg-red-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {deletingAccount ? 'Deleting…' : 'Delete forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Full Screen Coloring Canvas */}
       {coloringImageId && (() => {
@@ -1236,8 +1282,8 @@ const Workspace = ({ user, setView, logout, isDarkMode, setIsDarkMode, bookTitle
               // Update local storage
               try {
                 const updatedImg = newImages.find((i: ImageFile) => i.id === coloringImageId);
-                if (updatedImg) {
-                  await updateLocalImage(updatedImg);
+                if (updatedImg && user?.id) {
+                  await updateLocalImage(user.id, updatedImg);
                 }
               } catch (e) {
                 console.error("Failed to update local image", e);
@@ -1279,9 +1325,6 @@ const App: React.FC = () => {
   const [selectedTier, setSelectedTier] = useState<Tier>('free');
   const [images, setImages] = useState<ImageFile[]>([]);
   const [bookTitle, setBookTitle] = useState('My Coloring Book');
-  // True while waiting for the Stripe webhook to upgrade the tier after
-  // returning from checkout (renders the confirmation overlay below)
-  const [isUpgradeLoading, setIsUpgradeLoading] = useState(false);
 
   // Initialize dark mode from localStorage
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -1289,7 +1332,7 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : false;
   });
 
-  const { profile, loading, signOut, signUp, signIn } = useAuth();
+  const { profile, loading, signOut, signUp, signIn, deleteAccount } = useAuth();
 
   // Map Supabase profile to App User type
   const user: User | null = profile ? {
@@ -1323,35 +1366,6 @@ const App: React.FC = () => {
     else root.classList.remove('dark');
   }, [isDarkMode]);
 
-  // Handle Stripe checkout success - show loading state during self-healing
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('checkout') === 'success') {
-      console.log('Checkout success detected, showing loading screen...');
-      setIsUpgradeLoading(true);
-
-      // Clear the URL parameter without reloading
-      window.history.replaceState({}, '', window.location.pathname);
-
-      // Give the webhook time to update the tier (2-5 seconds)
-      // Then the useAuth hook's self-healing logic will pick up the change
-      setTimeout(() => {
-        setIsUpgradeLoading(false);
-        setView('workspace');
-      }, 5000);
-    }
-  }, []);
-
-  // Check for pending upgrade tier on mount
-  useEffect(() => {
-    const pendingTier = localStorage.getItem('pendingUpgradeTier');
-    if (pendingTier && (pendingTier === 'plus' || pendingTier === 'ultimate')) {
-      setSelectedTier(pendingTier as Tier);
-      localStorage.removeItem('pendingUpgradeTier');
-    }
-  }, []);
-
-
   // NOTE: localStorage persistence DISABLED - was causing QuotaExceededError crashes
   // The localStorage save was trying to store base64 image data which exceeds browser limits
   // This needs to be reimplemented with cloud storage (Supabase) instead
@@ -1380,8 +1394,9 @@ const App: React.FC = () => {
 
   // Load completed images from localStorage on mount
   useEffect(() => {
+    if (!user?.id) return; // No account, no saved images
     try {
-      const savedImages = getLocalImages();
+      const savedImages = getLocalImages(user.id);
       if (savedImages.length > 0) {
         console.log('✅ Loaded', savedImages.length, 'completed images from localStorage');
         // Convert StoredImage to ImageFile format
@@ -1400,7 +1415,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.warn('Could not load from localStorage:', e);
     }
-  }, []); // Run once on mount
+  }, [user?.id]); // Reload when the signed-in account changes
 
   // Clear the OLD user-specific storage key if it exists (clean up old format)
   useEffect(() => {
@@ -1414,50 +1429,21 @@ const App: React.FC = () => {
     }
   }, [storageKey]);
 
-  // Handle upgrade via Stripe checkout
-  const handleUpgrade = async (tier: Tier) => {
-    if (!user) {
-      // Not logged in, store selected tier and redirect to signup
-      localStorage.setItem('pendingUpgradeTier', tier);
-      setSelectedTier(tier);
-      setView('auth');
-      return;
-    }
-
-    try {
-      // Call the DEPLOYED Netlify function — relative URLs resolve against
-      // the Capacitor WebView origin, not the web backend
-      const response = await fetch(`${API_BASE}/.netlify/functions/create-checkout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tier,
-          userId: user.id,
-          email: user.email,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create checkout session');
-      }
-
-      const { url } = await response.json();
-
-      if (url) {
-        // Redirect to Stripe Checkout
-        window.location.href = url;
-      }
-    } catch (error) {
-      console.error('Error initiating checkout:', error);
-      alert('Failed to start checkout. Please try again.');
-    }
-  };
-
   const handleLogout = async () => {
-    localStorage.removeItem('colorable_master_mode'); // Clear master mode if active
     await signOut();
     setView('landing');
     setImages([]);
+  };
+
+  // Google Play account-deletion requirement: permanently removes the
+  // account server-side, then clears everything locally.
+  const handleDeleteAccount = async (): Promise<{ error: Error | null }> => {
+    const { error } = await deleteAccount();
+    if (!error) {
+      setImages([]);
+      setView('landing');
+    }
+    return { error };
   };
 
   if (loading) {
@@ -1481,21 +1467,6 @@ const App: React.FC = () => {
     );
   }
 
-  // Post-checkout overlay: confirms payment landed while the Stripe
-  // webhook upgrades the account tier (was previously an invisible wait)
-  if (isUpgradeLoading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950 space-y-6">
-        <CheckCircle2 className="text-green-500" size={64} />
-        <Loader2 className="animate-spin text-indigo-600" size={40} />
-        <div className="text-center space-y-2 px-6">
-          <p className="text-xl font-bold text-slate-900 dark:text-white">Payment successful!</p>
-          <p className="text-slate-500 font-medium">Activating your upgraded plan…</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 transition-colors duration-300">
       {view === 'landing' && (
@@ -1506,13 +1477,6 @@ const App: React.FC = () => {
           setSelectedTier={setSelectedTier}
           modelProgress={modelProgress}
           isInitializingModel={isInitializingModel}
-        />
-      )}
-      {view === 'pricing' && (
-        <PricingPage
-          setView={setView}
-          handleUpgrade={handleUpgrade}
-          currentUserTier={user?.tier}
         />
       )}
       {view === 'privacy' && (
@@ -1546,6 +1510,7 @@ const App: React.FC = () => {
           user={user}
           setView={setView}
           logout={handleLogout}
+          deleteAccount={handleDeleteAccount}
           isDarkMode={isDarkMode}
           setIsDarkMode={setIsDarkMode}
           bookTitle={bookTitle}

@@ -114,11 +114,15 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
     const [isEraser, setIsEraser] = useState(false);
     const [zoom, setZoom] = useState(1);
     const [pan, setPan] = useState({ x: 0, y: 0 });
+    const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+    const zoomRef = useRef(1);
+    const panRef = useRef({ x: 0, y: 0 });
     const [isSaving, setIsSaving] = useState(false);
     const [showColorPicker, setShowColorPicker] = useState(false);
     const [showBrushSettings, setShowBrushSettings] = useState(false);
-    const [history, setHistory] = useState<ImageData[]>([]);
-    const [historyIndex, setHistoryIndex] = useState(-1);
+    const historyRef = useRef<ImageData[]>([]);
+    const historyIndexRef = useRef(-1);
+    const [, setHistoryVersion] = useState(0); // re-render undo/redo buttons
     const [pressureEnabled, setPressureEnabled] = useState(true);
 
     // Constants
@@ -168,18 +172,8 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
                 saveHistory(); // Initial blank state
             }
 
-            // Auto-fit 'Zoom' to screen
-            if (containerRef.current) {
-                const containerH = containerRef.current.clientHeight;
-                const scale = (containerH - 100) / height; // Leave some padding
-                setZoom(Math.min(scale, 1));
-                // Center it
-                const containerW = containerRef.current.clientWidth;
-                setPan({
-                    x: (containerW - width * Math.min(scale, 1)) / 2,
-                    y: 50
-                });
-            }
+            setImgSize({ w: width, h: height });
+            fitToScreen(width, height);
         };
 
         initCanvas();
@@ -207,6 +201,7 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
 
     const startDrawing = (e: React.PointerEvent) => {
         e.preventDefault(); // Prevent scrolling
+        if (gestureRef.current || activePointers.current.size > 1) return; // two fingers = pan/zoom, not paint
         isDrawing.current = true;
         const { x, y, pressure } = getCoordinates(e);
         lastPoint.current = { x, y };
@@ -265,6 +260,7 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
     };
 
     const moveDrawing = (e: React.PointerEvent) => {
+        if (gestureRef.current) return;
         if (!isDrawing.current) return;
         const { x, y, pressure } = getCoordinates(e);
         draw(x, y, pressure);
@@ -278,47 +274,105 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
         }
     };
 
+    // --- Viewport: fit, zoom, pinch/pan gestures ---
+    useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+    useEffect(() => { panRef.current = pan; }, [pan]);
+
+    const fitToScreen = (w: number, h: number) => {
+        const c = containerRef.current;
+        if (!c || !w || !h) return;
+        const z = Math.min(Math.min(c.clientWidth / w, c.clientHeight / h) * 0.92, 3);
+        setZoom(z);
+        setPan({ x: (c.clientWidth - w * z) / 2, y: (c.clientHeight - h * z) / 2 });
+    };
+
+    const zoomBy = (factor: number) => {
+        const c = containerRef.current;
+        if (!c) return;
+        const cx = c.clientWidth / 2, cy = c.clientHeight / 2;
+        const z0 = zoomRef.current, p0 = panRef.current;
+        const z1 = Math.min(6, Math.max(0.2, z0 * factor));
+        setZoom(z1);
+        setPan({ x: cx - ((cx - p0.x) / z0) * z1, y: cy - ((cy - p0.y) / z0) * z1 });
+    };
+
+    const activePointers = useRef(new Map<number, { x: number; y: number }>());
+    const gestureRef = useRef<{ dist: number; mid: { x: number; y: number }; zoom: number; pan: { x: number; y: number } } | null>(null);
+
+    const gestureFrom = () => {
+        const pts = [...activePointers.current.values()];
+        const dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+        return { dist: Math.max(20, Math.hypot(dx, dy)), mid: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 } };
+    };
+
+    const handleContainerPointerDown = (e: React.PointerEvent) => {
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (activePointers.current.size === 2) {
+            // Second finger down: cancel any stroke the first finger started
+            if (isDrawing.current) {
+                isDrawing.current = false;
+                lastPoint.current = null;
+                const ctx = drawingCanvasRef.current?.getContext('2d');
+                const snap = historyRef.current[historyIndexRef.current];
+                if (ctx && snap) ctx.putImageData(snap, 0, 0);
+            }
+            gestureRef.current = { ...gestureFrom(), zoom: zoomRef.current, pan: panRef.current };
+        }
+    };
+
+    const handleContainerPointerMove = (e: React.PointerEvent) => {
+        if (!activePointers.current.has(e.pointerId)) return;
+        activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const g = gestureRef.current;
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!g || !rect || activePointers.current.size < 2) return;
+        const now = gestureFrom();
+        const z1 = Math.min(6, Math.max(0.2, g.zoom * (now.dist / g.dist)));
+        // Keep the world point under the pinch midpoint pinned to the fingers
+        const worldX = (g.mid.x - rect.left - g.pan.x) / g.zoom;
+        const worldY = (g.mid.y - rect.top - g.pan.y) / g.zoom;
+        setZoom(z1);
+        setPan({ x: now.mid.x - rect.left - worldX * z1, y: now.mid.y - rect.top - worldY * z1 });
+    };
+
+    const handleContainerPointerUp = (e: React.PointerEvent) => {
+        activePointers.current.delete(e.pointerId);
+        if (activePointers.current.size < 2) gestureRef.current = null;
+    };
+
 
     // --- History (Undo/Redo) ---
+    // Refs are the single source of truth; the version counter only forces
+    // button re-renders. (State + closures made snapshots land on stale indexes.)
     const saveHistory = () => {
-        const ctx = drawingCanvasRef.current?.getContext('2d');
-        if (!ctx || !drawingCanvasRef.current) return;
-
-        // Cap history at 20 steps to save memory
+        const canvas = drawingCanvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!ctx || !canvas) return;
         const maxHistory = 20;
-        const snapshot = ctx.getImageData(0, 0, drawingCanvasRef.current.width, drawingCanvasRef.current.height);
-
-        setHistory(prev => {
-            const newHistory = prev.slice(0, historyIndex + 1);
-            newHistory.push(snapshot);
-            if (newHistory.length > maxHistory) newHistory.shift();
-            return newHistory;
-        });
-
-        // Update index, handling the shift if max reached
-        setHistoryIndex(prev => Math.min(prev + 1, maxHistory - 1));
+        const snapshot = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        historyRef.current = historyRef.current.slice(0, historyIndexRef.current + 1);
+        historyRef.current.push(snapshot);
+        if (historyRef.current.length > maxHistory) historyRef.current.shift();
+        historyIndexRef.current = historyRef.current.length - 1;
+        setHistoryVersion(v => v + 1);
     };
 
     const handleUndo = () => {
-        if (historyIndex > 0) {
-            const ctx = drawingCanvasRef.current?.getContext('2d');
-            if (ctx) {
-                const newIndex = historyIndex - 1;
-                ctx.putImageData(history[newIndex], 0, 0);
-                setHistoryIndex(newIndex);
-            }
-        }
+        if (historyIndexRef.current <= 0) return;
+        const ctx = drawingCanvasRef.current?.getContext('2d');
+        if (!ctx) return;
+        historyIndexRef.current -= 1;
+        ctx.putImageData(historyRef.current[historyIndexRef.current], 0, 0);
+        setHistoryVersion(v => v + 1);
     };
 
     const handleRedo = () => {
-        if (historyIndex < history.length - 1) {
-            const ctx = drawingCanvasRef.current?.getContext('2d');
-            if (ctx) {
-                const newIndex = historyIndex + 1;
-                ctx.putImageData(history[newIndex], 0, 0);
-                setHistoryIndex(newIndex);
-            }
-        }
+        if (historyIndexRef.current >= historyRef.current.length - 1) return;
+        const ctx = drawingCanvasRef.current?.getContext('2d');
+        if (!ctx) return;
+        historyIndexRef.current += 1;
+        ctx.putImageData(historyRef.current[historyIndexRef.current], 0, 0);
+        setHistoryVersion(v => v + 1);
     };
 
 
@@ -370,10 +424,10 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
                     <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 mx-2 hidden sm:block"></div>
 
                     <div className="flex items-center gap-2">
-                        <button onClick={handleUndo} disabled={historyIndex <= 0} className="p-2 text-slate-500 disabled:opacity-30 hover:text-indigo-600 transition-colors">
+                        <button onClick={handleUndo} disabled={historyIndexRef.current <= 0} className="p-2 text-slate-500 disabled:opacity-30 hover:text-indigo-600 transition-colors">
                             <Undo size={20} />
                         </button>
-                        <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className="p-2 text-slate-500 disabled:opacity-30 hover:text-indigo-600 transition-colors">
+                        <button onClick={handleRedo} disabled={historyIndexRef.current >= historyRef.current.length - 1} className="p-2 text-slate-500 disabled:opacity-30 hover:text-indigo-600 transition-colors">
                             <Redo size={20} />
                         </button>
                     </div>
@@ -546,11 +600,17 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
             {/* --- Main Canvas Area --- */}
             <div
                 ref={containerRef}
-                className="flex-1 overflow-hidden relative touch-none bg-slate-200/50 dark:bg-black/50 flex items-center justify-center"
+                className="flex-1 overflow-hidden relative touch-none bg-slate-200/50 dark:bg-black/50"
+                onPointerDownCapture={handleContainerPointerDown}
+                onPointerMoveCapture={handleContainerPointerMove}
+                onPointerUpCapture={handleContainerPointerUp}
+                onPointerCancelCapture={handleContainerPointerUp}
             >
                 <div
-                    className="relative shadow-2xl bg-white"
+                    className="absolute top-0 left-0 shadow-2xl bg-white"
                     style={{
+                        width: imgSize.w,
+                        height: imgSize.h,
                         transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                         transformOrigin: '0 0',
                         cursor: isDrawing.current ? 'none' : 'crosshair'
@@ -580,9 +640,9 @@ const ColoringCanvas: React.FC<ColoringCanvasProps> = ({ imageUrl, onClose, onSa
 
                 {/* Navigation Controls (Bottom Left) */}
                 <div className="absolute bottom-6 left-6 flex flex-col gap-2 bg-white/90 dark:bg-slate-900/90 backdrop-blur rounded-2xl p-2 shadow-lg border border-slate-200 dark:border-slate-700">
-                    <button onClick={() => setZoom(z => Math.min(z + 0.1, 5))} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"><ZoomIn size={20} /></button>
-                    <button onClick={() => setZoom(z => Math.max(z - 0.1, 0.2))} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"><ZoomOut size={20} /></button>
-                    <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"><Maximize size={20} /></button>
+                    <button onClick={() => zoomBy(1.25)} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"><ZoomIn size={20} /></button>
+                    <button onClick={() => zoomBy(0.8)} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"><ZoomOut size={20} /></button>
+                    <button onClick={() => fitToScreen(imgSize.w, imgSize.h)} className="p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"><Maximize size={20} /></button>
                 </div>
             </div>
 

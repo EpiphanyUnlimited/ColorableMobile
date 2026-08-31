@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, type Profile } from '../lib/supabase'
+import { clearAllStoredImages } from '../lib/localStorage'
+import { API_BASE } from '../../services/apiConfig'
 import type { User, Session } from '@supabase/supabase-js'
 
 export interface AuthContextType {
@@ -10,6 +12,7 @@ export interface AuthContextType {
     signUp: (email: string, password: string, metadata: { display_name: string; tier: string }) => Promise<{ data: { user: User | null; session: Session | null } | null; error: Error | null }>
     signIn: (email: string, password: string) => Promise<{ data: { user: User | null; session: Session | null } | null; error: Error | null }>
     signOut: () => Promise<void>
+    deleteAccount: () => Promise<{ error: Error | null }>
     updateProfile: (updates: Partial<Profile>) => Promise<void>
 }
 
@@ -43,35 +46,6 @@ export function useAuth(): AuthContextType {
                 return prev;
             });
         }, 5000);
-
-        // Check for MASTER USER MODE (Bypass)
-        const isMasterMode = localStorage.getItem('colorable_master_mode') === 'true';
-
-        if (isMasterMode) {
-            console.log('🕶️ MASTER USER MODE ACTIVE: Bypassing Supabase Auth');
-            const masterUser: any = {
-                id: 'master-user-id',
-                email: 'master@colorable.ai',
-                aud: 'authenticated',
-                created_at: new Date().toISOString()
-            };
-            const masterProfile: Profile = {
-                id: 'master-user-id',
-                email: 'master@colorable.ai',
-                tier: 'ultimate', // ULTIMATE ACCESS
-                is_admin: true,
-                created_at: new Date().toISOString(),
-                display_name: 'Master User',
-                credits: 9999,
-                pdf_downloads_this_month: 0
-            } as any;
-
-            setSession({ user: masterUser, access_token: 'valid', refresh_token: 'valid' } as any);
-            setUser(masterUser);
-            setProfile(masterProfile);
-            setLoading(false);
-            return; // EXIT EARLY - DO NOT CALL SUPABASE
-        }
 
         // Get initial session
         supabase.auth.getSession()
@@ -406,6 +380,46 @@ export function useAuth(): AuthContextType {
     }
 
     /**
+     * Permanently delete the current user's account.
+     *
+     * Required by Google Play's account-deletion policy. The actual deletion
+     * runs server-side (Netlify function with the Supabase service-role key,
+     * see netlify-web-function/delete-account.mjs) after verifying the
+     * caller's own JWT — the anon key in this app can never delete users.
+     * On success, all locally stored artwork is wiped and the session ends.
+     */
+    const deleteAccount = async (): Promise<{ error: Error | null }> => {
+        if (!session?.access_token) {
+            return { error: new Error('No active session. Please sign in again, then retry.') }
+        }
+        try {
+            const res = await fetch(`${API_BASE}/.netlify/functions/delete-account`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${session.access_token}` },
+            })
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({} as any))
+                throw new Error(body?.error || `Account deletion failed (HTTP ${res.status}). Please try again or email us.`)
+            }
+
+            // Server-side account is gone — wipe local artwork and end the session.
+            try { if (user?.id) clearAllStoredImages(user.id) } catch { /* non-fatal */ }
+            try { await supabase.auth.signOut() } catch { /* user no longer exists — expected */ }
+            setUser(null)
+            setProfile(null)
+            setSession(null)
+            return { error: null }
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e)
+            // fetch() network failures surface as unhelpful "Failed to fetch"
+            const friendly = /fetch|network|load failed/i.test(msg)
+                ? 'Could not reach the server. Account deletion requires an internet connection — please check your connection and try again.'
+                : msg
+            return { error: new Error(friendly) }
+        }
+    }
+
+    /**
      * Update user profile
      */
     const updateProfile = async (updates: Partial<Profile>): Promise<void> => {
@@ -429,6 +443,7 @@ export function useAuth(): AuthContextType {
         signUp,
         signIn,
         signOut,
+        deleteAccount,
         updateProfile,
     }
 }

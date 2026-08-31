@@ -13,9 +13,10 @@ interface LocalImage {
     createdAt: number;
 }
 
-export const initDB = (): Promise<IDBDatabase> => {
+// One IndexedDB database per signed-in user so accounts never see each other's images
+export const initDB = (userId: string): Promise<IDBDatabase> => {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        const request = indexedDB.open(`${DB_NAME}_${userId}`, DB_VERSION);
 
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(request.result);
@@ -29,8 +30,8 @@ export const initDB = (): Promise<IDBDatabase> => {
     });
 };
 
-export const saveImageToLocal = async (img: any) => { // Using any for compatibility with App.tsx types temporarily
-    const db = await initDB();
+export const saveImageToLocal = async (userId: string, img: any) => { // Using any for compatibility with App.tsx types temporarily
+    const db = await initDB(userId);
     return new Promise<void>(async (resolve, reject) => {
         try {
             // Convert URLs to Blobs for storage if they aren't already
@@ -74,8 +75,8 @@ export const saveImageToLocal = async (img: any) => { // Using any for compatibi
     });
 };
 
-export const loadAllImagesFromLocal = async (): Promise<any[]> => {
-    const db = await initDB();
+export const loadAllImagesFromLocal = async (userId: string): Promise<any[]> => {
+    const db = await initDB(userId);
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly');
         const store = tx.objectStore(STORE_NAME);
@@ -99,8 +100,8 @@ export const loadAllImagesFromLocal = async (): Promise<any[]> => {
     });
 };
 
-export const deleteLocalImage = async (id: string) => {
-    const db = await initDB();
+export const deleteLocalImage = async (userId: string, id: string) => {
+    const db = await initDB(userId);
     return new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
@@ -110,8 +111,8 @@ export const deleteLocalImage = async (id: string) => {
     });
 }
 
-export const updateLocalImage = async (img: any) => {
-    const db = await initDB();
+export const updateLocalImage = async (userId: string, img: any) => {
+    const db = await initDB(userId);
     return new Promise<void>(async (resolve, reject) => {
         try {
             const tx = db.transaction(STORE_NAME, 'readwrite');

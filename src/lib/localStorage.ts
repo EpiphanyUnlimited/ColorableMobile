@@ -8,7 +8,8 @@
  * Only save coloringUrl (the result), not original images.
  */
 
-const STORAGE_KEY = 'coloringbook_completed_images';
+// Per-account key: each signed-in user gets their own bucket
+const storageKeyFor = (userId: string) => `coloringbook_completed_images_${userId}`;
 
 export interface StoredImage {
     id: string;
@@ -43,9 +44,9 @@ function getAvailableSpace(): number {
 /**
  * Get all saved completed images from localStorage
  */
-export function getLocalImages(): StoredImage[] {
+export function getLocalImages(userId: string): StoredImage[] {
     try {
-        const stored = localStorage.getItem(STORAGE_KEY);
+        const stored = localStorage.getItem(storageKeyFor(userId));
         if (!stored) return [];
         const images = JSON.parse(stored);
         // Filter out any invalid entries
@@ -61,6 +62,7 @@ export function getLocalImages(): StoredImage[] {
  * Only call this when an image finishes processing successfully
  */
 export function saveCompletedImage(
+    userId: string,
     id: string,
     name: string,
     coloringUrl: string,
@@ -74,7 +76,7 @@ export function saveCompletedImage(
             return false;
         }
 
-        const images = getLocalImages();
+        const images = getLocalImages(userId);
 
         // Check if this image already exists
         const existingIndex = images.findIndex(img => img.id === id);
@@ -109,7 +111,7 @@ export function saveCompletedImage(
             }
         }
 
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(images));
+        localStorage.setItem(storageKeyFor(userId), JSON.stringify(images));
         console.log('✅ Saved completed image to localStorage:', id);
         return true;
     } catch (error: any) {
@@ -120,11 +122,11 @@ export function saveCompletedImage(
             console.warn('⚠️ localStorage quota exceeded, clearing old images...');
             try {
                 // Remove oldest images until we can save
-                const images = getLocalImages();
+                const images = getLocalImages(userId);
                 while (images.length > 0) {
                     images.shift(); // Remove oldest
                     try {
-                        localStorage.setItem(STORAGE_KEY, JSON.stringify(images));
+                        localStorage.setItem(storageKeyFor(userId), JSON.stringify(images));
                         console.log('✅ Cleared space, now have', images.length, 'images');
                         return false; // Return false since we didn't save the new one
                     } catch {
@@ -132,7 +134,7 @@ export function saveCompletedImage(
                     }
                 }
                 // Last resort: clear everything
-                localStorage.removeItem(STORAGE_KEY);
+                localStorage.removeItem(storageKeyFor(userId));
                 console.log('⚠️ Cleared all localStorage images due to quota');
             } catch (clearError) {
                 console.error('Failed to clear localStorage:', clearError);
@@ -148,11 +150,12 @@ export function saveCompletedImage(
  * Update an existing stored image (e.g., after adding text overlay)
  */
 export function updateStoredImage(
+    userId: string,
     imageId: string,
     updates: Partial<Pick<StoredImage, 'coloringUrl' | 'overlayText' | 'overlayPosition'>>
 ): boolean {
     try {
-        const images = getLocalImages();
+        const images = getLocalImages(userId);
         const index = images.findIndex(img => img.id === imageId);
 
         if (index < 0) {
@@ -161,7 +164,7 @@ export function updateStoredImage(
         }
 
         images[index] = { ...images[index], ...updates };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(images));
+        localStorage.setItem(storageKeyFor(userId), JSON.stringify(images));
         console.log('✅ Updated stored image:', imageId);
         return true;
     } catch (error: any) {
@@ -177,11 +180,11 @@ export function updateStoredImage(
 /**
  * Delete image from localStorage
  */
-export function deleteStoredImage(imageId: string): boolean {
+export function deleteStoredImage(userId: string, imageId: string): boolean {
     try {
-        const images = getLocalImages();
+        const images = getLocalImages(userId);
         const filtered = images.filter(img => img.id !== imageId);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+        localStorage.setItem(storageKeyFor(userId), JSON.stringify(filtered));
         console.log('✅ Deleted stored image:', imageId);
         return true;
     } catch (error) {
@@ -193,9 +196,9 @@ export function deleteStoredImage(imageId: string): boolean {
 /**
  * Clear all saved images from localStorage
  */
-export function clearAllStoredImages(): boolean {
+export function clearAllStoredImages(userId: string): boolean {
     try {
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(storageKeyFor(userId));
         console.log('✅ All stored images cleared');
         return true;
     } catch (error) {
@@ -207,9 +210,9 @@ export function clearAllStoredImages(): boolean {
 /**
  * Get storage info for debugging
  */
-export function getStorageInfo(): { imageCount: number; estimatedSizeKB: number } {
+export function getStorageInfo(userId: string): { imageCount: number; estimatedSizeKB: number } {
     try {
-        const stored = localStorage.getItem(STORAGE_KEY) || '[]';
+        const stored = localStorage.getItem(storageKeyFor(userId)) || '[]';
         const images = JSON.parse(stored);
         return {
             imageCount: images.length,

@@ -8,3 +8,7 @@ android/capacitor-cordova-android-plugins/
 .env
 .env.*
 !.env.example
+
+# Release signing — never commit (backed up separately)
+android/keystore.properties
+android/app/colorable-upload.keystore
