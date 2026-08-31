@@ -1,5 +1,5 @@
 # Colorable — Google Play Store Listing Kit
-Package: `com.magiccoloringbook.colorable` · Version 1.0 (versionCode 3) · Epiphany Unlimited, Inc.
+Package: `com.magiccoloringbook.colorable` · Version 1.0 (versionCode 3, targetSdk 36) · Epiphany Unlimited, Inc.
 
 ---
 
@@ -115,6 +115,10 @@ Console answers driven by this:
 - **"Could your store listing unintentionally appeal to children?"** — moot; it intentionally does
 - **Participate in Designed for Families**: Yes (app meets Families Policy requirements)
 - **Ads declaration**: app contains no ads
+- **AI-generated content**: answer **No** — the Android build ships no generative AI.
+  Line art is a deterministic on-device edge/line transform (out of policy scope per
+  Google's AI-Generated Content policy), and the vestigial remix "scenario" prompt
+  that implied generation was removed in versionCode 3.
 - **IARC content rating questionnaire**: answer everything "No" (no violence, no user
   interaction/communication features, no data sharing, no gambling) → expect **Everyone / PEGI 3**
 - **Teacher Approved** program: optional; can apply after launch, not required
@@ -133,7 +137,7 @@ states explicitly.
 | Website | `https://colorableai.netlify.app` |
 | Phone | *optional — leave blank* |
 | Privacy policy | `https://colorableai.netlify.app/privacy` |
-| Data deletion | `https://colorableai.netlify.app/privacy` *(Account & Data Deletion section — merge web PR #6 and redeploy BEFORE submitting, or reviewers see the homepage)* |
+| Data deletion | `https://colorableai.netlify.app/delete-account` *(dedicated page — merge web PR #7 and redeploy before submitting)* |
 
 ---
 

@@ -821,8 +821,10 @@ const Workspace = ({ user, kidsMode, setView, logout, deleteAccount, isDarkMode,
       return;
     }
 
-    const scenario = window.prompt("What should they be doing? (e.g., 'A hero in space', 'A wizard in a library')");
-    if (!scenario) return;
+    // Re-trace the original photo through the on-device model. (The old
+    // cloud path took a text scenario; the local model cannot use one, so we
+    // no longer ask — an input the app ignores is worse than no input.)
+    if (!window.confirm('Re-trace this page from the original photo?')) return;
 
     // Save original coloringUrl to restore on failure
     const originalColoringUrl = img.coloringUrl;
