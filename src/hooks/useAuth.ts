@@ -43,14 +43,29 @@ export function useAuth(): AuthContextType {
             CapApp.addListener('appUrlOpen', async ({ url }) => {
                 try {
                     if (!url || !url.startsWith('colorable://')) return
-                    const fragment = url.includes('#') ? url.split('#')[1] : (url.split('?')[1] || '')
-                    const params = new URLSearchParams(fragment)
+                    // Merge query (?a=b) and fragment (#a=b) params — implicit
+                    // flow delivers tokens in the fragment, PKCE delivers a
+                    // one-time ?code= instead. Handle both.
+                    const params = new URLSearchParams()
+                    for (const part of [url.split('#')[1], url.split('#')[0].split('?')[1]]) {
+                        if (part) new URLSearchParams(part).forEach((v, k) => params.set(k, v))
+                    }
                     const access_token = params.get('access_token')
                     const refresh_token = params.get('refresh_token')
+                    const code = params.get('code')
+                    console.log('Deep link received:', {
+                        hasTokens: !!(access_token && refresh_token),
+                        hasCode: !!code,
+                        error: params.get('error_description') || params.get('error') || null
+                    })
                     if (access_token && refresh_token) {
                         const { error } = await supabase.auth.setSession({ access_token, refresh_token })
                         if (error) console.error('Deep-link setSession failed:', error.message)
-                        else console.log('✅ Signed in via email-verification deep link')
+                        else console.log('✅ Signed in via deep link (implicit tokens)')
+                    } else if (code) {
+                        const { error } = await supabase.auth.exchangeCodeForSession(code)
+                        if (error) console.error('Deep-link code exchange failed:', error.message)
+                        else console.log('✅ Signed in via deep link (PKCE code)')
                     }
                 } catch (e) {
                     console.error('Deep-link handling error:', e)
