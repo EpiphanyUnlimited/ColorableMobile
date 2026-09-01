@@ -227,7 +227,10 @@ const PrivacyPage = ({ setView }: { setView: (view: any) => void; isDarkMode: bo
           <h2 className={`text-3xl font-black mb-6 ${contrastText}`}>💳 Payments</h2>
           <p className={subText + " text-lg"}>
             This app does not process payments and contains no in-app purchases.
-            If your account has a subscription that was purchased on our website, that payment was processed
+            Colorable subscriptions (Plus and Ultimate) are purchased on our website, not in this app.
+            Once a subscription has been processed on the website, signing in to the app with the same
+            account applies your premium tier automatically — there is nothing to buy or activate here.
+            Website payments are processed
             by <a href="https://stripe.com/privacy" className="text-indigo-600 hover:underline">Stripe</a>;
             we never see or store your card details.
           </p>
