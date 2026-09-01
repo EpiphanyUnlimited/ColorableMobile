@@ -40,7 +40,7 @@ export function useAuth(): AuthContextType {
         // colorable://auth-callback#access_token=...&refresh_token=... after
         // confirming, letting us establish the session with no manual login.
         if (Capacitor.isNativePlatform()) {
-            CapApp.addListener('appUrlOpen', async ({ url }) => {
+            const handleAuthDeepLink = async (url: string | null | undefined) => {
                 try {
                     if (!url || !url.startsWith('colorable://')) return
                     // Merge query (?a=b) and fragment (#a=b) params — implicit
@@ -70,7 +70,12 @@ export function useAuth(): AuthContextType {
                 } catch (e) {
                     console.error('Deep-link handling error:', e)
                 }
-            })
+            }
+            CapApp.addListener('appUrlOpen', ({ url }) => { handleAuthDeepLink(url) })
+            // Cold start: if the verification link is what LAUNCHED the app,
+            // appUrlOpen fires before this listener exists — the launch URL
+            // API is the only way to see it.
+            CapApp.getLaunchUrl().then(r => handleAuthDeepLink(r?.url)).catch(() => {})
         }
 
         console.log('🚀 useAuth hook initializing...');
