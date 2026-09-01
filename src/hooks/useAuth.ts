@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase, type Profile } from '../lib/supabase'
+import { Capacitor } from '@capacitor/core'
+import { App as CapApp } from '@capacitor/app'
 import { clearAllStoredImages } from '../lib/localStorage'
 import { API_BASE } from '../../services/apiConfig'
 import type { User, Session } from '@supabase/supabase-js'
@@ -34,6 +36,28 @@ export function useAuth(): AuthContextType {
     };
 
     useEffect(() => {
+        // Email-verification deep link: Supabase redirects to
+        // colorable://auth-callback#access_token=...&refresh_token=... after
+        // confirming, letting us establish the session with no manual login.
+        if (Capacitor.isNativePlatform()) {
+            CapApp.addListener('appUrlOpen', async ({ url }) => {
+                try {
+                    if (!url || !url.startsWith('colorable://')) return
+                    const fragment = url.includes('#') ? url.split('#')[1] : (url.split('?')[1] || '')
+                    const params = new URLSearchParams(fragment)
+                    const access_token = params.get('access_token')
+                    const refresh_token = params.get('refresh_token')
+                    if (access_token && refresh_token) {
+                        const { error } = await supabase.auth.setSession({ access_token, refresh_token })
+                        if (error) console.error('Deep-link setSession failed:', error.message)
+                        else console.log('✅ Signed in via email-verification deep link')
+                    }
+                } catch (e) {
+                    console.error('Deep-link handling error:', e)
+                }
+            })
+        }
+
         console.log('🚀 useAuth hook initializing...');
 
         // Safety timeout to prevent infinite loading
@@ -310,7 +334,15 @@ export function useAuth(): AuthContextType {
                 email,
                 password,
                 options: {
-                    data: metadata
+                    data: metadata,
+                    // On Android the verification link must come back into the
+                    // app (colorable:// deep link) instead of the website.
+                    // Supabase appends session tokens to the redirect, so the
+                    // appUrlOpen listener in the init effect can sign the user
+                    // in directly.
+                    ...(Capacitor.isNativePlatform()
+                        ? { emailRedirectTo: 'colorable://auth-callback' }
+                        : {})
                 }
             })
 

@@ -347,7 +347,7 @@ const AuthPage = ({ selectedTier, signUp, signIn, setBookTitle, setView, initial
             <CheckCircle2 size={32} className="shrink-0" />
             <div>
               <p className="text-xl">{successMessage}</p>
-              <p className="text-sm font-normal mt-2 opacity-80">Once confirmed, return here or refresh the page.</p>
+              <p className="text-sm font-normal mt-2 opacity-80">Tap the link in that email and you'll be brought back here, signed in and ready to go.</p>
             </div>
           </div>
         )}
